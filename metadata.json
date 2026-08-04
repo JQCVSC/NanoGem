@@ -1,0 +1,6 @@
+{
+  "name": "NanoGemini",
+  "description": "Ultra-secure Docker-sandboxed AI developer environment powered by Gemini",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
