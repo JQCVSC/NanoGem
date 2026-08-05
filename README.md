@@ -52,7 +52,7 @@ nanogemini/
 
 ### 1. Clone & Configure
 ```bash
-git clone https://github.com/JQCVSC/NanoGem/nanogemini.git
+git clone https://github.com/JQCVSC/NanoGem.git
 cd nanogemini
 
 # Create your environment file
