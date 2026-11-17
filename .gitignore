@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .nanogem/
 nanogem_workspaces/
+sandbox_workspace/*
+!sandbox_workspace/.gitkeep
