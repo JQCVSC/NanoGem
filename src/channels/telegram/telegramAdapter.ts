@@ -3,10 +3,9 @@ import { Bot, webhookCallback, type Context } from "grammy";
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SYSTEM_INSTRUCTION,
-  isConfiguredGeminiApiKey,
-  runGeminiAgent,
   type AgentServiceDependencies,
 } from "../../agent/agentService.ts";
+import { resolveAgentProvider, type AgentProvider } from "../../agent/provider.ts";
 import {
   buildProjectSystemInstruction,
   loadProjectInstructionsAndMemory,
@@ -52,6 +51,7 @@ export interface TelegramAdapterDeps {
   projectStore: ProjectStore;
   sessionStore: SessionStore;
   mappingStore: TelegramMappingStore;
+  agentProvider?: AgentProvider;
   agentDeps?: AgentServiceDependencies;
   geminiApiKey?: string;
 }
@@ -62,8 +62,7 @@ export class TelegramChannelAdapter {
   private readonly projectStore: ProjectStore;
   private readonly sessionStore: SessionStore;
   private readonly mappingStore: TelegramMappingStore;
-  private readonly agentDeps: AgentServiceDependencies;
-  private readonly geminiApiKey?: string;
+  private readonly agentProvider: AgentProvider;
   private bot: Bot | null = null;
   private pollingActive = false;
 
@@ -73,8 +72,12 @@ export class TelegramChannelAdapter {
     this.projectStore = deps.projectStore;
     this.sessionStore = deps.sessionStore;
     this.mappingStore = deps.mappingStore;
-    this.agentDeps = deps.agentDeps || {};
-    this.geminiApiKey = deps.geminiApiKey;
+    this.agentProvider =
+      deps.agentProvider ??
+      resolveAgentProvider(undefined, {
+        ...(deps.agentDeps || {}),
+        apiKey: deps.agentDeps?.apiKey ?? deps.geminiApiKey,
+      });
   }
 
   private async sendSafeFormatted(
@@ -196,9 +199,8 @@ export class TelegramChannelAdapter {
       return { handled: false, authorized: true };
     }
 
-    const activeKey = this.geminiApiKey ?? process.env.GEMINI_API_KEY;
-    if (!this.agentDeps.client && !isConfiguredGeminiApiKey(activeKey)) {
-      const reply = "GEMINI_API_KEY is not configured on the NanoGem host server.";
+    if (!this.agentProvider.isConfigured()) {
+      const reply = `${this.agentProvider.displayName} API key is not configured on the NanoGem host server.`;
       await sink.sendText(msg.chatId, reply);
       return { handled: true, authorized: true, reply };
     }
@@ -261,22 +263,16 @@ export class TelegramChannelAdapter {
     });
 
     try {
-      const result = await runGeminiAgent(
-        {
-          message: extracted.prompt,
-          history,
-          model: binding.session.model || DEFAULT_GEMINI_MODEL,
-          systemInstruction,
-          protectContextFiles: true,
-          sandboxConfig: projectSandbox,
-          onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
-          onEvent: (event) => progressStream.handleAgentEvent(event),
-        },
-        {
-          ...this.agentDeps,
-          apiKey: this.agentDeps.apiKey ?? activeKey,
-        }
-      );
+      const result = await this.agentProvider.run({
+        message: extracted.prompt,
+        history,
+        model: binding.session.model || DEFAULT_GEMINI_MODEL,
+        systemInstruction,
+        protectContextFiles: true,
+        sandboxConfig: projectSandbox,
+        onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
+        onEvent: (event) => progressStream.handleAgentEvent(event),
+      });
 
       this.sessionStore.appendMessage({
         sessionId: binding.session.id,

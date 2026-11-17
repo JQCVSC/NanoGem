@@ -1,10 +1,9 @@
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SYSTEM_INSTRUCTION,
-  isConfiguredGeminiApiKey,
-  runGeminiAgent,
   type AgentServiceDependencies,
 } from "../agent/agentService.ts";
+import { resolveAgentProvider, type AgentProvider } from "../agent/provider.ts";
 import {
   buildProjectSystemInstruction,
   loadProjectInstructionsAndMemory,
@@ -35,6 +34,7 @@ export interface SchedulerServiceDeps {
   mappingStore?: TelegramMappingStore;
   telegramConfig?: TelegramConfig;
   sendTelegramMessage?: (chatId: string, text: string) => Promise<void>;
+  agentProvider?: AgentProvider;
   agentDeps?: AgentServiceDependencies;
   geminiApiKey?: string;
   maxConcurrentGlobal?: number;
@@ -63,8 +63,7 @@ export class SchedulerService {
   private readonly mappingStore?: TelegramMappingStore;
   private readonly telegramConfig?: TelegramConfig;
   private readonly sendTelegramMessage?: (chatId: string, text: string) => Promise<void>;
-  private readonly agentDeps: AgentServiceDependencies;
-  private readonly geminiApiKey?: string;
+  private readonly agentProvider: AgentProvider;
   private readonly maxConcurrentGlobal: number;
   private readonly pollIntervalMs: number;
 
@@ -81,8 +80,12 @@ export class SchedulerService {
     this.mappingStore = deps.mappingStore;
     this.telegramConfig = deps.telegramConfig;
     this.sendTelegramMessage = deps.sendTelegramMessage;
-    this.agentDeps = deps.agentDeps || {};
-    this.geminiApiKey = deps.geminiApiKey;
+    this.agentProvider =
+      deps.agentProvider ??
+      resolveAgentProvider(undefined, {
+        ...(deps.agentDeps || {}),
+        apiKey: deps.agentDeps?.apiKey ?? deps.geminiApiKey,
+      });
     this.maxConcurrentGlobal = deps.maxConcurrentGlobal ?? 2;
     this.pollIntervalMs = deps.pollIntervalMs ?? 15_000;
 
@@ -183,9 +186,8 @@ export class SchedulerService {
     const runRecord = this.scheduleStore.recordRunStarted(task.id, project.id, session.id);
 
     try {
-      const activeKey = this.geminiApiKey ?? process.env.GEMINI_API_KEY;
-      if (!this.agentDeps.client && !isConfiguredGeminiApiKey(activeKey)) {
-        throw new Error("GEMINI_API_KEY is not configured on the server.");
+      if (!this.agentProvider.isConfigured()) {
+        throw new Error(`${this.agentProvider.displayName} API key is not configured on the server.`);
       }
 
       const prompt = task.promptOverride || TASK_PROMPTS[task.taskKind];
@@ -209,21 +211,15 @@ export class SchedulerService {
       });
 
       const progressStream = new AgentProgressStream();
-      const result = await runGeminiAgent(
-        {
-          message: prompt,
-          model: DEFAULT_GEMINI_MODEL,
-          systemInstruction,
-          protectContextFiles: true,
-          sandboxConfig: projectSandbox,
-          onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
-          onEvent: (event) => progressStream.handleAgentEvent(event),
-        },
-        {
-          ...this.agentDeps,
-          apiKey: this.agentDeps.apiKey ?? activeKey,
-        }
-      );
+      const result = await this.agentProvider.run({
+        message: prompt,
+        model: DEFAULT_GEMINI_MODEL,
+        systemInstruction,
+        protectContextFiles: true,
+        sandboxConfig: projectSandbox,
+        onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
+        onEvent: (event) => progressStream.handleAgentEvent(event),
+      });
 
       this.sessionStore.appendMessage({
         sessionId: session.id,

@@ -68,3 +68,8 @@
 - Added `src/scheduler/schedulerService.ts` disabled by default (`NANOGEM_SCHEDULES_ENABLED=false`), bound to approved projects, executing via `runGeminiAgent` + `AgentProgressStream` + `projectStore.buildSandboxConfigForProject`, enforcing per-project & global concurrency guards, recovering interrupted runs on startup, and sending optional authenticated Telegram notifications.
 - Added `/api/schedules*` endpoints in `server.ts`, `src/components/SchedulesPanel.tsx` UI tab, and `NANOGEM_SCHEDULES_ENABLED` in `.env.example`.
 - Added tests in `tests/scheduler.test.ts` covering schedule parsing, pause/resume/delete, concurrency limits, failure persistence, Telegram notification auth, and restart recovery.
+
+## Stage 9 — Internal Agent Provider Seam
+- Added `src/agent/provider.ts` defining `AgentProvider`, `AgentProviderCapabilities`, `GeminiAgentProvider`, and `resolveAgentProvider` (defaulting to `"gemini"` and rejecting any unsupported provider name).
+- Updated `server.ts`, `src/channels/telegram/telegramAdapter.ts`, and `src/scheduler/schedulerService.ts` to execute through `AgentProvider` without leaking Gemini-specific client types or duplicating execution logic.
+- Added unit tests in `tests/provider.test.ts` covering provider selection, typed capabilities, configuration validation, and unsupported provider rejection.

@@ -7,10 +7,9 @@ import { createServer as createViteServer } from "vite";
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SYSTEM_INSTRUCTION,
-  isConfiguredGeminiApiKey,
-  runGeminiAgent,
   writeWorkspaceFile,
 } from "./src/agent/agentService.ts";
+import { resolveAgentProvider } from "./src/agent/provider.ts";
 import {
   DEFAULT_GEMINI_MD_TEMPLATE,
   DEFAULT_MEMORY_MD_TEMPLATE,
@@ -70,6 +69,7 @@ const DB_PATH = path.resolve(
 
 const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
 const securityConfig = loadServerSecurityConfig();
+const agentProvider = resolveAgentProvider();
 const telegramConfig = loadTelegramConfig();
 const db = openNanoGemDatabase(DB_PATH);
 const projectStore = new ProjectStore(db, PROJECTS_ROOT);
@@ -82,6 +82,7 @@ const telegramAdapter = new TelegramChannelAdapter({
   projectStore,
   sessionStore,
   mappingStore: telegramMappingStore,
+  agentProvider,
 });
 const schedulerService = new SchedulerService({
   enabledByEnv: isSchedulingEnabledByEnv(),
@@ -91,6 +92,7 @@ const schedulerService = new SchedulerService({
   scheduleStore,
   mappingStore: telegramMappingStore,
   telegramConfig,
+  agentProvider,
   sendTelegramMessage: (chatId, text) => telegramAdapter.sendNotification(chatId, text),
 });
 
@@ -1058,7 +1060,7 @@ async function executeProjectChatTurn(
     });
   }
 
-  if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
+  if (!agentProvider.isConfigured()) {
     throw Object.assign(new Error("GEMINI_API_KEY is not configured on the server."), {
       statusCode: 503,
     });
@@ -1096,7 +1098,7 @@ async function executeProjectChatTurn(
     progressStream.subscribe(onProgress);
   }
 
-  const result = await runGeminiAgent({
+  const result = await agentProvider.run({
     message,
     history: effectiveHistory,
     model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
@@ -1160,9 +1162,9 @@ app.post("/api/agent/chat/stream", async (req, res) => {
   if (!preCheck.project) {
     return res.status(preCheck.errorStatus || 404).json({ error: preCheck.errorMessage });
   }
-  if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
+  if (!agentProvider.isConfigured()) {
     return res.status(503).json({
-      error: "GEMINI_API_KEY is not configured on the server.",
+      error: `${agentProvider.displayName} API key is not configured on the server.`,
     });
   }
 
