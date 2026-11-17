@@ -12,6 +12,15 @@ import {
   writeWorkspaceFile,
 } from "./src/agent/agentService.ts";
 import {
+  DEFAULT_GEMINI_MD_TEMPLATE,
+  DEFAULT_MEMORY_MD_TEMPLATE,
+  MAX_PROJECT_CONTEXT_BYTES,
+  appendCuratedProjectMemory,
+  buildProjectSystemInstruction,
+  loadProjectInstructionsAndMemory,
+  saveProjectContextFile,
+} from "./src/agent/projectContext.ts";
+import {
   applySecurityHeaders,
   createApiAuthMiddleware,
   loadServerSecurityConfig,
@@ -727,6 +736,85 @@ app.post("/api/workspace/reset", async (req, res) => {
   }
 });
 
+// GET Project Instructions (GEMINI.md) and Memory (MEMORY.md)
+app.get("/api/projects/:projectId/context", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const loaded = await loadProjectInstructionsAndMemory(project.workspacePath);
+    res.json({
+      projectId: project.id,
+      projectName: project.name,
+      ...loaded,
+      defaultGeminiTemplate: DEFAULT_GEMINI_MD_TEMPLATE,
+      defaultMemoryTemplate: DEFAULT_MEMORY_MD_TEMPLATE,
+      maxBytes: MAX_PROJECT_CONTEXT_BYTES,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT Project Instructions (GEMINI.md) or Memory (MEMORY.md)
+app.put("/api/projects/:projectId/context", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const { kind, content } = req.body || {};
+    if (kind !== "GEMINI.md" && kind !== "MEMORY.md") {
+      return res.status(400).json({ error: "kind must be 'GEMINI.md' or 'MEMORY.md'" });
+    }
+    if (typeof content !== "string") {
+      return res.status(400).json({ error: "content must be a string" });
+    }
+    const saved = await saveProjectContextFile(project.workspacePath, kind, content);
+    const loaded = await loadProjectInstructionsAndMemory(project.workspacePath);
+    res.json({
+      projectId: project.id,
+      saved,
+      ...loaded,
+      maxBytes: MAX_PROJECT_CONTEXT_BYTES,
+    });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to save project context";
+    const status = /exceeds|Security Error|must be/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+// POST Append curated entry to MEMORY.md (explicit user action)
+app.post("/api/projects/:projectId/memory/append", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const { entry, sourceFile } = req.body || {};
+    if (typeof entry !== "string" || !entry.trim()) {
+      return res.status(400).json({ error: "Memory entry is required" });
+    }
+    if (sourceFile !== undefined && typeof sourceFile !== "string") {
+      return res.status(400).json({ error: "sourceFile must be a string" });
+    }
+    const appended = await appendCuratedProjectMemory(project.workspacePath, entry, sourceFile);
+    res.json({
+      projectId: project.id,
+      memoryMd: appended.content,
+      bytes: appended.bytes,
+      redactedCount: appended.redactedCount,
+      maxBytes: MAX_PROJECT_CONTEXT_BYTES,
+    });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to append project memory";
+    const status = /Security Error|exceed|empty/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
 // POST Agent Chat endpoint with Autonomous Function Calling Loop
 app.post("/api/agent/chat", async (req, res) => {
   try {
@@ -781,15 +869,24 @@ app.post("/api/agent/chat", async (req, res) => {
       sandboxConfig,
       ctx.project.id
     );
+    const projectCtx = await loadProjectInstructionsAndMemory(ctx.project.workspacePath);
+    const baseSystemInstruction =
+      typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION;
+    const effectiveSystemInstruction = buildProjectSystemInstruction({
+      baseInstruction: baseSystemInstruction,
+      projectName: ctx.project.name,
+      geminiMd: projectCtx.geminiMd,
+      memoryMd: projectCtx.memoryMd,
+    });
 
     const result = await runGeminiAgent({
       message,
       history: effectiveHistory,
       model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
       temperature: typeof temperature === "number" ? temperature : 0,
-      systemInstruction:
-        typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION,
+      systemInstruction: effectiveSystemInstruction,
       maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
+      protectContextFiles: true,
       sandboxConfig: projectSandbox,
     });
 

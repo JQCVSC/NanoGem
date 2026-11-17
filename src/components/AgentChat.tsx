@@ -14,12 +14,14 @@ import {
   Copy,
   Check,
   Zap,
+  BookmarkPlus,
 } from "lucide-react";
 import { ChatMessage, ExecutionStep } from "../types";
 
 interface AgentChatProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
+  onSaveToMemory?: (text: string) => Promise<void>;
   isExecuting: boolean;
   onSelectTab: (tab: "files" | "terminal") => void;
 }
@@ -34,10 +36,12 @@ const SAMPLE_PROMPTS = [
 export const AgentChat: React.FC<AgentChatProps> = ({
   messages,
   onSendMessage,
+  onSaveToMemory,
   isExecuting,
   onSelectTab,
 }) => {
   const [input, setInput] = useState("");
+  const [savedMsgIds, setSavedMsgIds] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -118,6 +122,28 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                 <span className="text-[10px] text-slate-500 font-mono">
                   {msg.timestamp}
                 </span>
+                {msg.role === "assistant" && onSaveToMemory && msg.content && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onSaveToMemory(msg.content);
+                      setSavedMsgIds((prev) => ({ ...prev, [msg.id]: true }));
+                    }}
+                    className="ml-auto px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-emerald-300 rounded text-[10px] font-mono flex items-center gap-1 transition-colors"
+                  >
+                    {savedMsgIds[msg.id] ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Saved to MEMORY.md</span>
+                      </>
+                    ) : (
+                      <>
+                        <BookmarkPlus className="w-3 h-3 text-emerald-400" />
+                        <span>Save to Project Memory</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Message Content / Tools */}

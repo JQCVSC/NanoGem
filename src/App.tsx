@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { FolderPlus, MessageSquarePlus, FolderGit2, History } from "lucide-react";
-import { Header } from "./components/Header";
+import { Header, type AppTab } from "./components/Header";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
+import { ProjectContextPanel } from "./components/ProjectContextPanel";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
@@ -17,7 +18,7 @@ import {
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<"chat" | "files" | "terminal" | "export">("chat");
+  const [activeTab, setActiveTab] = useState<AppTab>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
@@ -343,6 +344,24 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
+  const handleSaveToProjectMemory = async (content: string) => {
+    try {
+      const res = await apiFetch(
+        `/api/projects/${encodeURIComponent(activeProjectId)}/memory/append`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entry: content }),
+        }
+      );
+      if (res.ok) {
+        await loadWorkspaceFiles(activeProjectId);
+      }
+    } catch (err) {
+      console.error("Failed to save to project memory:", err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased">
       <Header
@@ -426,6 +445,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
           <AgentChat
             messages={messages}
             onSendMessage={handleSendMessage}
+            onSaveToMemory={handleSaveToProjectMemory}
             isExecuting={isExecuting}
             onSelectTab={(tab) => setActiveTab(tab)}
           />
@@ -438,6 +458,15 @@ Always think step-by-step. Use your tools immediately when needed without asking
             onRefreshFiles={() => loadWorkspaceFiles(activeProjectId)}
             onSaveFile={handleSaveWorkspaceFile}
             onDeleteFile={handleDeleteWorkspaceFile}
+          />
+        )}
+
+        {activeTab === "context" && (
+          <ProjectContextPanel
+            projectId={activeProjectId}
+            projectName={
+              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
+            }
           />
         )}
 

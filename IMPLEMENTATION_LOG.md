@@ -32,3 +32,10 @@
 - Added project/session selector and creation UI in `src/App.tsx`, `src/components/FileWorkspace.tsx`, `src/components/InteractiveTerminal.tsx`, and `src/types.ts`.
 - Added `.nanogem/` and `nanogem_workspaces/` to `.gitignore` and `.dockerignore`.
 - Added persistence-across-restart and cross-project isolation tests in `tests/storage.test.ts` and `tests/smoke.test.ts`.
+
+## Stage 4 — Per-Project Instructions (`GEMINI.md`) and Memory (`MEMORY.md`)
+- Added `src/agent/projectContext.ts` supporting per-project `GEMINI.md` and `MEMORY.md` with 16 KiB size limits, symlink-safe loading/saving, secret-file import rejection (`.env`, `.pem`, `.key`, `id_rsa`, etc.), secret pattern redaction, and `buildProjectSystemInstruction` with untrusted-content & Gemini API data-handling boundaries.
+- Protected `GEMINI.md` and `MEMORY.md` from silent model overwrites in `src/agent/agentService.ts` (`protectContextFiles`).
+- Added `/api/projects/:projectId/context` (`GET`/`PUT`) and `/api/projects/:projectId/memory/append` (`POST`) in `server.ts`, and wired `GEMINI.md` + `MEMORY.md` loading into `POST /api/agent/chat`.
+- Added `src/components/ProjectContextPanel.tsx` (view/edit workflow + prompt-injection & data-handling warning) and explicit `"Save to Project Memory"` action in `src/components/AgentChat.tsx`.
+- Added unit tests in `tests/projectContext.test.ts`.

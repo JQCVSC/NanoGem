@@ -10,12 +10,15 @@ import {
   ShieldAlert,
   Lock,
   Download,
+  BookOpen,
 } from "lucide-react";
 import { RuntimeStatus } from "../types";
 
+export type AppTab = "chat" | "files" | "context" | "terminal" | "export";
+
 interface HeaderProps {
-  activeTab: "chat" | "files" | "terminal" | "export";
-  setActiveTab: (tab: "chat" | "files" | "terminal" | "export") => void;
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
   onResetWorkspace: () => void;
   onOpenSettings: () => void;
   onOpenAuth: () => void;
@@ -103,6 +106,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <FolderTree className="w-4 h-4" />
             Workspace Files
+          </button>
+
+          <button
+            onClick={() => setActiveTab("context")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === "context"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            Instructions & Memory
           </button>
 
           <button

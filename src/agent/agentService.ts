@@ -100,6 +100,7 @@ export interface AgentRunInput {
   temperature?: number;
   systemInstruction?: string;
   maxTurns?: number;
+  protectContextFiles?: boolean;
   sandboxConfig: SandboxConfig;
   onEvent?: (event: AgentEvent) => void | Promise<void>;
 }
@@ -184,7 +185,8 @@ export function createDefaultGeminiClient(
 export async function writeWorkspaceFile(
   workspaceDir: string,
   filePath: string,
-  content: string
+  content: string,
+  options: { protectContextFiles?: boolean } = {}
 ): Promise<{ ok: boolean; output: string }> {
   const safePath = await resolveSafeWorkspacePath(workspaceDir, filePath);
   if (!safePath) {
@@ -192,6 +194,17 @@ export async function writeWorkspaceFile(
       ok: false,
       output: "Security Error: Cannot write files outside of /workspace/",
     };
+  }
+  if (options.protectContextFiles) {
+    const normalizedRel = path.relative(workspaceDir, safePath).replace(/\\/g, "/").toLowerCase();
+    if (normalizedRel === "gemini.md" || normalizedRel === "memory.md") {
+      return {
+        ok: false,
+        output:
+          `Protected Context File: Cannot silently overwrite /workspace/${path.basename(safePath)}. ` +
+          `Show the proposed changes to the user so they can explicitly save them to project instructions/memory.`,
+      };
+    }
   }
   try {
     await fs.mkdir(path.dirname(safePath), { recursive: true });
@@ -384,7 +397,8 @@ export async function runGeminiAgent(
               const writeResult = await writeWorkspaceFile(
                 input.sandboxConfig.workspaceDir,
                 fnArgs.file_path,
-                fnArgs.content
+                fnArgs.content,
+                { protectContextFiles: input.protectContextFiles !== false }
               );
               toolResult = writeResult.output;
               toolSuccess = writeResult.ok;
