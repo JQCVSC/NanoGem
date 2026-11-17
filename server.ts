@@ -51,6 +51,11 @@ import {
   SchedulerService,
   isSchedulingEnabledByEnv,
 } from "./src/scheduler/schedulerService.ts";
+import {
+  WORKFLOW_DATA_HANDLING_NOTICE,
+  WORKFLOW_TEMPLATES,
+  prepareWorkflowPrompt,
+} from "./src/workflows/projectWorkflows.ts";
 
 const app = express();
 
@@ -1032,6 +1037,60 @@ app.delete("/api/schedules/:taskId", (req, res) => {
   const deleted = scheduleStore.deleteTask(req.params.taskId);
   if (!deleted) return res.status(404).json({ error: "Scheduled task not found" });
   res.json({ deleted: true });
+});
+
+// --- OPTIONAL PROJECT WORKFLOW TEMPLATES ---
+
+app.get("/api/workflows/templates", (_req, res) => {
+  res.json({
+    templates: WORKFLOW_TEMPLATES,
+    dataHandlingNotice: WORKFLOW_DATA_HANDLING_NOTICE,
+  });
+});
+
+app.post("/api/projects/:projectId/workflows/run", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const { templateId, goal = "", selectedFiles = [], confirmSendToGemini, sessionId } =
+      req.body || {};
+
+    const prepared = await prepareWorkflowPrompt({
+      workspaceDir: project.workspacePath,
+      templateId: String(templateId || ""),
+      goal: typeof goal === "string" ? goal : "",
+      selectedFiles: Array.isArray(selectedFiles) ? selectedFiles : [],
+      confirmSendToGemini: confirmSendToGemini === true,
+    });
+
+    const payload = await executeProjectChatTurn({
+      message: prepared.prompt,
+      projectId: project.id,
+      sessionId,
+    });
+
+    res.json({
+      ...payload,
+      workflow: {
+        templateId: prepared.template.id,
+        title: prepared.template.title,
+        includedFiles: prepared.includedFiles,
+        totalBytes: prepared.totalBytes,
+      },
+    });
+  } catch (error: any) {
+    const msg = error?.message || "Workflow failed";
+    const status =
+      typeof error?.statusCode === "number"
+        ? error.statusCode
+        : /Security Error/i.test(msg)
+          ? 403
+          : /Explicit confirmation|Unknown workflow|Unsupported file|Sensitive file|exceeds|must be/i.test(msg)
+            ? 400
+            : 500;
+    res.status(status).json({ error: msg });
+  }
 });
 
 async function executeProjectChatTurn(

@@ -13,10 +13,19 @@ import {
   BookOpen,
   FileDiff,
   Clock,
+  FileSpreadsheet,
 } from "lucide-react";
 import { RuntimeStatus } from "../types";
 
-export type AppTab = "chat" | "files" | "context" | "git" | "schedules" | "terminal" | "export";
+export type AppTab =
+  | "chat"
+  | "files"
+  | "context"
+  | "git"
+  | "schedules"
+  | "workflows"
+  | "terminal"
+  | "export";
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -144,6 +153,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Clock className="w-4 h-4" />
             Schedules
+          </button>
+
+          <button
+            onClick={() => setActiveTab("workflows")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === "workflows"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Workflows
           </button>
 
           <button

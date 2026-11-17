@@ -154,3 +154,14 @@ export interface ScheduledTaskRunInfo {
   startedAt: string;
   finishedAt: string | null;
 }
+
+export interface WorkflowTemplateInfo {
+  id: "technical_research" | "doc_generation" | "data_analysis" | "python_report";
+  title: string;
+  description: string;
+  outputFormat: string;
+  allowedExtensions: string[];
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  defaultGoal: string;
+}

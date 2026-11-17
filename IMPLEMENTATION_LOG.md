@@ -73,3 +73,9 @@
 - Added `src/agent/provider.ts` defining `AgentProvider`, `AgentProviderCapabilities`, `GeminiAgentProvider`, and `resolveAgentProvider` (defaulting to `"gemini"` and rejecting any unsupported provider name).
 - Updated `server.ts`, `src/channels/telegram/telegramAdapter.ts`, and `src/scheduler/schedulerService.ts` to execute through `AgentProvider` without leaking Gemini-specific client types or duplicating execution logic.
 - Added unit tests in `tests/provider.test.ts` covering provider selection, typed capabilities, configuration validation, and unsupported provider rejection.
+
+## Stage 10 — Optional Research, Documentation & Data Workflows
+- Added `src/workflows/projectWorkflows.ts` providing four focused templates (`technical_research`, `doc_generation`, `data_analysis`, `python_report`) with output formats, per-file/total size limits (64 KiB / 128 KiB), allowed extension validation, sensitive-file rejection (`.env`, keys, credentials), path-traversal checks, explicit Gemini upload confirmation (`confirmSendToGemini`), and an accurate data-handling notice.
+- Added `/api/workflows/templates` and `/api/projects/:projectId/workflows/run` in `server.ts`.
+- Added `src/components/WorkflowsPanel.tsx` and the `"Workflows"` tab in `src/components/Header.tsx` and `src/App.tsx`.
+- Added unit tests in `tests/workflows.test.ts` covering templates, confirmation gate, allowed/rejected file types, sensitive files, path traversal, and size limits.

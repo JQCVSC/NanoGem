@@ -6,6 +6,7 @@ import { FileWorkspace } from "./components/FileWorkspace";
 import { ProjectContextPanel } from "./components/ProjectContextPanel";
 import { GitReviewPanel } from "./components/GitReviewPanel";
 import { SchedulesPanel } from "./components/SchedulesPanel";
+import { WorkflowsPanel } from "./components/WorkflowsPanel";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
@@ -537,6 +538,42 @@ Always think step-by-step. Use your tools immediately when needed without asking
             projectName={
               projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
             }
+          />
+        )}
+
+        {activeTab === "workflows" && (
+          <WorkflowsPanel
+            projectId={activeProjectId}
+            projectName={
+              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
+            }
+            files={workspaceFiles}
+            isExecuting={isExecuting}
+            onWorkflowCompleted={(userPrompt, data) => {
+              const now = new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).substring(2, 9),
+                  role: "user",
+                  content: userPrompt,
+                  timestamp: now,
+                },
+                {
+                  id: Math.random().toString(36).substring(2, 9),
+                  role: "assistant",
+                  content: data.text || "Workflow completed.",
+                  timestamp: now,
+                  executionSteps: data.executionSteps || [],
+                },
+              ]);
+              if (data.files) setWorkspaceFiles(data.files);
+              if (data.sessionId) setActiveSessionId(data.sessionId);
+              setActiveTab("chat");
+            }}
           />
         )}
 
