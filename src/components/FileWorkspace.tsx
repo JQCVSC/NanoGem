@@ -16,6 +16,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { WorkspaceFile } from "../types";
+import { apiFetch } from "../api";
 
 interface FileWorkspaceProps {
   files: WorkspaceFile[];
@@ -47,7 +48,7 @@ export const FileWorkspace: React.FC<FileWorkspaceProps> = ({
   const loadFileContent = async (path: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/workspace/file?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`/api/workspace/file?path=${encodeURIComponent(path)}`);
       if (res.ok) {
         const data = await res.json();
         setFileContent(data.content || "");

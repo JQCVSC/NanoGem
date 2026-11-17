@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Header } from "./components/Header";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
-import { ChatMessage, WorkspaceFile, AgentSettings } from "./types";
+import { ChatMessage, WorkspaceFile, AgentSettings, RuntimeStatus } from "./types";
+import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "files" | "terminal" | "export">("chat");
@@ -13,6 +14,9 @@ export default function App() {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [tokenInput, setTokenInput] = useState<string>(() => getStoredApiToken());
 
   const [agentSettings, setAgentSettings] = useState<AgentSettings>({
     model: "gemini-3.6-flash",
@@ -26,9 +30,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
   });
 
   // Load initial workspace file tree
-  const loadWorkspaceFiles = async () => {
+  const loadWorkspaceFiles = useCallback(async () => {
     try {
-      const res = await fetch("/api/workspace/files");
+      const res = await apiFetch("/api/workspace/files");
       if (res.ok) {
         const data = await res.json();
         setWorkspaceFiles(data.files || []);
@@ -36,11 +40,43 @@ Always think step-by-step. Use your tools immediately when needed without asking
     } catch (err) {
       console.error("Failed to load workspace files:", err);
     }
-  };
+  }, []);
+
+  const loadRuntimeStatus = useCallback(async () => {
+    try {
+      const healthRes = await fetch("/api/health");
+      if (healthRes.ok) {
+        const health = await healthRes.json();
+        if (health.authRequired && !getStoredApiToken()) {
+          setIsAuthModalOpen(true);
+        }
+      }
+      const res = await apiFetch("/api/runtime/status");
+      if (res.ok) {
+        const data: RuntimeStatus = await res.json();
+        setRuntimeStatus(data);
+      }
+    } catch (err) {
+      console.error("Failed to load runtime status:", err);
+    }
+  }, []);
 
   useEffect(() => {
+    const unsubscribe = onUnauthorized(() => {
+      setIsAuthModalOpen(true);
+    });
+    loadRuntimeStatus();
     loadWorkspaceFiles();
-  }, []);
+    return unsubscribe;
+  }, [loadRuntimeStatus, loadWorkspaceFiles]);
+
+  const handleSaveApiToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStoredApiToken(tokenInput);
+    setIsAuthModalOpen(false);
+    await loadRuntimeStatus();
+    await loadWorkspaceFiles();
+  };
 
   // Handle Agent Chat Message Submission
   const handleSendMessage = async (text: string) => {
@@ -65,7 +101,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         content: m.content,
       }));
 
-      const res = await fetch("/api/agent/chat", {
+      const res = await apiFetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -116,7 +152,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
   const handleResetWorkspace = async () => {
     if (window.confirm("Are you sure you want to reset the /workspace/ directory to default state? All created files will be cleared.")) {
       try {
-        const res = await fetch("/api/workspace/reset", { method: "POST" });
+        const res = await apiFetch("/api/workspace/reset", { method: "POST" });
         const data = await res.json();
         if (data.files) {
           setWorkspaceFiles(data.files);
@@ -131,7 +167,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
   // Save File directly in Workspace Editor
   const handleSaveWorkspaceFile = async (path: string, content: string) => {
     try {
-      await fetch("/api/workspace/file", {
+      await apiFetch("/api/workspace/file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, content }),
@@ -145,7 +181,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
   // Delete File in Workspace Editor
   const handleDeleteWorkspaceFile = async (path: string) => {
     try {
-      await fetch(`/api/workspace/file?path=${encodeURIComponent(path)}`, {
+      await apiFetch(`/api/workspace/file?path=${encodeURIComponent(path)}`, {
         method: "DELETE",
       });
       await loadWorkspaceFiles();
@@ -161,6 +197,8 @@ Always think step-by-step. Use your tools immediately when needed without asking
         setActiveTab={setActiveTab}
         onResetWorkspace={handleResetWorkspace}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        runtimeStatus={runtimeStatus}
         isExecuting={isExecuting}
       />
 
@@ -194,6 +232,42 @@ Always think step-by-step. Use your tools immediately when needed without asking
         settings={agentSettings}
         onSaveSettings={(newSettings) => setAgentSettings(newSettings)}
       />
+
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+          <form
+            onSubmit={handleSaveApiToken}
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
+          >
+            <h2 className="text-sm font-bold text-slate-100">API Authentication Required</h2>
+            <p className="text-xs text-slate-400">
+              Enter your <code className="text-emerald-400">NANOGEM_API_TOKEN</code> to authenticate requests to the NanoGem server.
+            </p>
+            <input
+              type="password"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="Paste NANOGEM_API_TOKEN..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+            />
+            <div className="flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(false)}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs"
+              >
+                Save Token
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

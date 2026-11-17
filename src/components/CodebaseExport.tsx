@@ -10,6 +10,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { NanoGeminiSource } from "../types";
+import { apiFetch } from "../api";
 
 export const CodebaseExport: React.FC = () => {
   const [source, setSource] = useState<NanoGeminiSource | null>(null);
@@ -17,9 +18,11 @@ export const CodebaseExport: React.FC = () => {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetch("/api/nanogemini/source")
-      .then((res) => res.json())
-      .then((data) => setSource(data))
+    apiFetch("/api/nanogemini/source")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setSource(data);
+      })
       .catch((err) => console.error("Error loading source:", err));
   }, []);
 
@@ -83,14 +86,16 @@ export const CodebaseExport: React.FC = () => {
             Execute these commands in your terminal to launch the isolated Docker container:
           </p>
           <pre className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg text-emerald-400 text-xs overflow-x-auto">
-{`# 1. Export your Gemini API Key
-export GEMINI_API_KEY="your_api_key_here"
+{`# 1. Build the hardened Docker sandbox image
+./scripts/build-sandbox.sh
 
-# 2. Build the Docker sandbox image
-docker build -t nanogemini .
-
-# 3. Start the interactive sandbox agent
-docker run -it -e GEMINI_API_KEY=$GEMINI_API_KEY nanogemini`}
+# 2. Run a command inside the isolated sandbox (no network, non-root, dropped caps)
+docker run --rm --init \\
+  --mount type=bind,source="$(pwd)/sandbox_workspace",target=/workspace \\
+  --workdir /workspace \\
+  --user 1000:1000 --cap-drop=ALL --security-opt=no-new-privileges:true \\
+  --network=none --cpus=1.0 --memory=512m --memory-swap=512m --pids-limit=64 \\
+  nanogem-sandbox:latest /bin/bash -c "ls -la"`}
           </pre>
         </div>
 

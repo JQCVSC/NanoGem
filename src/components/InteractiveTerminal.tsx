@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Terminal as TerminalIcon, Play, Trash2, CornerDownLeft, Sparkles } from "lucide-react";
+import { apiFetch } from "../api";
 
 interface TerminalHistoryItem {
   id: string;
@@ -34,7 +35,7 @@ export const InteractiveTerminal: React.FC = () => {
     const timestamp = new Date().toLocaleTimeString();
 
     try {
-      const res = await fetch("/api/workspace/terminal", {
+      const res = await apiFetch("/api/workspace/terminal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: cmdToRun }),

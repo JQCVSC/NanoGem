@@ -1,17 +1,26 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs/promises";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { createServer as createViteServer } from "vite";
-
-const execAsync = promisify(exec);
+import {
+  applySecurityHeaders,
+  createApiAuthMiddleware,
+  loadServerSecurityConfig,
+} from "./src/server/auth.ts";
+import {
+  checkDockerAvailability,
+  executeSandboxCommand,
+  loadSandboxConfig,
+  resolveSafeWorkspacePath,
+} from "./src/server/sandboxRuntime.ts";
 
 const app = express();
-const PORT = 3000;
 
+app.disable("x-powered-by");
+app.use(applySecurityHeaders);
 app.use(express.json({ limit: "10mb" }));
 
 // 1. Initialize Gemini Client
@@ -30,8 +39,12 @@ const getGeminiClient = () => {
   });
 };
 
-// 2. Setup Sandbox Workspace Directory
+// 2. Setup Sandbox Workspace Directory & Runtime Configuration
 const WORKSPACE_DIR = path.resolve(process.cwd(), "sandbox_workspace");
+const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
+const securityConfig = loadServerSecurityConfig();
+
+app.use("/api", createApiAuthMiddleware(securityConfig));
 
 function ensureWorkspace() {
   if (!existsSync(WORKSPACE_DIR)) {
@@ -185,34 +198,17 @@ if __name__ == "__main__":
 ensureWorkspace();
 
 // Helper for security path checking
-function resolveSafePath(filePath: string): string | null {
-  const resolved = path.resolve(WORKSPACE_DIR, filePath);
-  if (!resolved.startsWith(WORKSPACE_DIR)) {
-    return null;
-  }
-  return resolved;
+async function resolveSafePath(filePath: string): Promise<string | null> {
+  return resolveSafeWorkspacePath(WORKSPACE_DIR, filePath);
 }
 
 // 3. Workspace Utility Functions
 async function executeSystemCommand(command: string): Promise<string> {
-  try {
-    const { stdout, stderr } = await execAsync(command, {
-      cwd: WORKSPACE_DIR,
-      timeout: 30000, // 30 sec timeout
-      env: { ...process.env, PATH: process.env.PATH },
-    });
-    const output = (stdout || "") + (stderr ? `\n[STDERR]:\n${stderr}` : "");
-    return output.trim() || "Command executed successfully (no output).";
-  } catch (error: any) {
-    if (error.killed) {
-      return "Error: Command timed out after 30 seconds.";
-    }
-    return `Error executing command: ${error.message}\n${error.stderr || ""}`;
-  }
+  return executeSandboxCommand(command, sandboxConfig);
 }
 
 async function writeLocalFile(filePath: string, content: string): Promise<string> {
-  const safePath = resolveSafePath(filePath);
+  const safePath = await resolveSafePath(filePath);
   if (!safePath) {
     return "Security Error: Cannot write files outside of /workspace/";
   }
@@ -300,35 +296,79 @@ const agentFunctionDeclarations: FunctionDeclaration[] = [
 
 // Healthcheck
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", workspace: WORKSPACE_DIR });
+  res.json({
+    status: "ok",
+    executionMode: sandboxConfig.executionMode,
+    authRequired: securityConfig.authRequired,
+  });
+});
+
+// Runtime sandbox posture & Docker status
+app.get("/api/runtime/status", async (req, res) => {
+  const docker =
+    sandboxConfig.executionMode === "docker"
+      ? await checkDockerAvailability(sandboxConfig)
+      : null;
+
+  res.json({
+    executionMode: sandboxConfig.executionMode,
+    authRequired: securityConfig.authRequired,
+    docker:
+      sandboxConfig.executionMode === "docker"
+        ? {
+            image: sandboxConfig.dockerImage,
+            user: sandboxConfig.dockerUser,
+            network: sandboxConfig.dockerNetwork,
+            cpus: sandboxConfig.dockerCpus,
+            memory: sandboxConfig.dockerMemory,
+            pidsLimit: sandboxConfig.dockerPidsLimit,
+            readOnly: sandboxConfig.dockerReadOnly,
+            ...docker,
+          }
+        : null,
+  });
 });
 
 // GET Source code of NanoGemini python codebase for export & inspection
 app.get("/api/nanogemini/source", (req, res) => {
   const codebase = {
-    dockerfile: `FROM python:3.11-slim
+    dockerfile: `FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y \\
-    curl \\
+ARG SANDBOX_UID=1000
+ARG SANDBOX_GID=1000
+
+RUN test "\${SANDBOX_UID}" != "0" && test "\${SANDBOX_GID}" != "0" \\
+  && apt-get update \\
+  && apt-get install -y --no-install-recommends \\
+    bash \\
+    ca-certificates \\
     git \\
-    nano \\
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
-    && apt-get install -y nodejs \\
-    && apt-get clean \\
-    && rm -rf /var/lib/apt/lists/*
+    python3 \\
+    python3-pip \\
+    python3-venv \\
+    python-is-python3 \\
+  && apt-get clean \\
+  && rm -rf /var/lib/apt/lists/* \\
+  && find / -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || true
 
-WORKDIR /app
+RUN (userdel -r node 2>/dev/null || true) \\
+  && (groupdel node 2>/dev/null || true) \\
+  && groupadd -g "\${SANDBOX_GID}" sandbox \\
+  && useradd -m -u "\${SANDBOX_UID}" -g "\${SANDBOX_GID}" -d /home/sandbox -s /bin/bash sandbox \\
+  && mkdir -p /workspace \\
+  && chown -R "\${SANDBOX_UID}:\${SANDBOX_GID}" /workspace /home/sandbox
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV HOME=/home/sandbox \\
+    PYTHONDONTWRITEBYTECODE=1 \\
+    PIP_NO_CACHE_DIR=1 \\
+    NPM_CONFIG_CACHE=/home/sandbox/.npm
 
-RUN mkdir -p /workspace
+WORKDIR /workspace
+USER sandbox
 
-COPY agent.py .
-
-ENTRYPOINT ["python", "agent.py"]`,
+CMD ["/bin/bash"]`,
     requirements: `google-genai>=0.1.1\npython-dotenv>=1.0.0`,
-    envExample: `GEMINI_API_KEY=your_gemini_api_key_here`,
+    envExample: `GEMINI_API_KEY=your_gemini_api_key_here\nHOST=127.0.0.1\nNANOGEM_EXECUTION_MODE=docker\nNANOGEM_DOCKER_NETWORK=none`,
     agentPy: `import os
 import subprocess
 from google import genai
@@ -462,10 +502,23 @@ def run_interactive_loop():
 if __name__ == "__main__":
     run_interactive_loop()`,
     startSandboxSh: `#!/usr/bin/env bash
-echo "Building NanoGemini Docker sandbox..."
-docker build -t nanogemini .
-echo "Starting isolated NanoGemini container..."
-docker run -it -e GEMINI_API_KEY=$GEMINI_API_KEY nanogemini`,
+set -euo pipefail
+./scripts/build-sandbox.sh
+docker run --rm --init \\
+  --mount type=bind,source="$(pwd)/sandbox_workspace",target=/workspace \\
+  --workdir /workspace \\
+  --user 1000:1000 \\
+  --cap-drop=ALL \\
+  --security-opt=no-new-privileges:true \\
+  --network=none \\
+  --cpus=1.0 \\
+  --memory=512m \\
+  --memory-swap=512m \\
+  --pids-limit=64 \\
+  --read-only \\
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777 \\
+  --tmpfs /home/sandbox:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \\
+  nanogem-sandbox:latest /bin/bash -c "ls -la"`,
   };
   res.json(codebase);
 });
@@ -487,7 +540,7 @@ app.get("/api/workspace/file", async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).json({ error: "Missing path query parameter" });
 
-    const safePath = resolveSafePath(filePath);
+    const safePath = await resolveSafePath(filePath);
     if (!safePath) return res.status(403).json({ error: "Access denied" });
 
     const content = await fs.readFile(safePath, "utf-8");
@@ -501,7 +554,9 @@ app.get("/api/workspace/file", async (req, res) => {
 app.post("/api/workspace/file", async (req, res) => {
   try {
     const { path: filePath, content } = req.body;
-    if (!filePath) return res.status(400).json({ error: "Missing file path" });
+    if (!filePath || typeof filePath !== "string") {
+      return res.status(400).json({ error: "Missing file path" });
+    }
 
     const result = await writeLocalFile(filePath, content ?? "");
     res.json({ result });
@@ -516,7 +571,7 @@ app.delete("/api/workspace/file", async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).json({ error: "Missing file path" });
 
-    const safePath = resolveSafePath(filePath);
+    const safePath = await resolveSafePath(filePath);
     if (!safePath) return res.status(403).json({ error: "Access denied" });
 
     await fs.rm(safePath, { recursive: true, force: true });
@@ -565,10 +620,17 @@ If a user asks you to build an app or run a script, create the files, install de
 Always think step-by-step. Use your tools immediately when needed without asking for permission.`,
     } = req.body;
 
-    if (!message) {
+    if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "Message is required" });
     }
 
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      return res.status(503).json({
+        error: "GEMINI_API_KEY is not configured on the server.",
+      });
+    }
+
+    const safeHistory = Array.isArray(history) ? history : [];
     const ai = getGeminiClient();
 
     // Prepare contents history
@@ -576,8 +638,8 @@ Always think step-by-step. Use your tools immediately when needed without asking
     const contents: any[] = [];
 
     // Format previous turns
-    for (const item of history) {
-      if (item.role && item.content) {
+    for (const item of safeHistory) {
+      if (item && typeof item.role === "string" && typeof item.content === "string") {
         contents.push({
           role: item.role === "user" ? "user" : "model",
           parts: [{ text: item.content }],
@@ -696,7 +758,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
 });
 
 // Start Express / Vite Server
-async function startServer() {
+export async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -711,9 +773,27 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[NanoGemini Server] Running on http://0.0.0.0:${PORT}`);
+  return app.listen(securityConfig.port, securityConfig.host, () => {
+    console.log(
+      `[NanoGemini Server] Running on http://${securityConfig.host}:${securityConfig.port} ` +
+        `(execution=${sandboxConfig.executionMode}, auth=${securityConfig.authRequired ? "enabled" : "loopback-only"})`
+    );
+    if (sandboxConfig.executionMode === "host") {
+      console.warn(
+        "[SECURITY WARNING] NANOGEM_EXECUTION_MODE=host is active. Commands run directly on the host without Docker isolation!"
+      );
+    } else {
+      console.log(
+        `[NanoGemini Sandbox] Docker image=${sandboxConfig.dockerImage}, user=${sandboxConfig.dockerUser}, ` +
+          `network=${sandboxConfig.dockerNetwork}, cpus=${sandboxConfig.dockerCpus}, ` +
+          `memory=${sandboxConfig.dockerMemory}, pids=${sandboxConfig.dockerPidsLimit}`
+      );
+    }
   });
 }
 
-startServer();
+if (process.env.NANOGEM_SKIP_LISTEN !== "1") {
+  startServer();
+}
+
+export { app, sandboxConfig, securityConfig };

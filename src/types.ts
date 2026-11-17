@@ -43,3 +43,21 @@ export interface AgentSettings {
   systemInstruction: string;
   sandboxDir: string;
 }
+
+export interface RuntimeStatus {
+  executionMode: "docker" | "host";
+  authRequired: boolean;
+  docker: {
+    image: string;
+    user: string;
+    network: string;
+    cpus: string;
+    memory: string;
+    pidsLimit: number;
+    readOnly: boolean;
+    available: boolean;
+    imagePresent: boolean;
+    serverVersion?: string;
+    error?: string;
+  } | null;
+}
