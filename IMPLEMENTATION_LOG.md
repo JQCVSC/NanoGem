@@ -89,3 +89,9 @@
 ## Stage 12 — Documentation & Website Copy
 - Created `WEBSITE_COPY.md` aligned with implemented behavior (positioning NanoGem as a Gemini-native coding agent for local projects with a boundary around autonomous execution, without unsupported privacy/offline/provider claims).
 - Updated `README.md`, `SECURITY.md`, and `.env.example` covering browser workflow, Docker sandbox, project memory, Git review, Telegram setup, opt-in scheduled tasks, Gemini API data-handling limitations, safe deployment guidance, troubleshooting, configuration reference, and security disclosure process.
+
+## Stage 13 — Final Integration, Tests & Release Candidate
+- Audited tracked files (`git ls-files`) and server/client logging for leaked credentials, unguarded destructive routes, accidental host fallback, missing migrations, or stale documentation.
+- Expanded `tests/smoke.test.ts` browser API smoke checks across context, Git review/revert confirmation, schedules, workflow templates, and SSE `/api/agent/chat/stream` auth/readiness.
+- Executed full release-candidate checks: `npm ci`, `bash -n scripts/build-sandbox.sh`, `npm run lint`, `npm run build`, and `node --test tests/*.test.ts` (35/35 tests passed).
+- Created `RELEASE_CHECKLIST.md` documenting passed checks, blocked checks (`docker` absent locally), known limitations, and exact manual setup steps.

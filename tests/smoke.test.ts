@@ -203,6 +203,55 @@ test("built server enforces auth and docker default, and supports explicit host 
       { headers: authHeaders }
     );
     assert.equal(crossProjectSess.status, 403);
+
+    // Release-candidate browser API smoke checks (auth + endpoints)
+    assert.equal((await fetch("http://127.0.0.1:3199/api/projects/default/context")).status, 401);
+    assert.equal((await fetch("http://127.0.0.1:3199/api/schedules")).status, 401);
+    assert.equal(
+      (await fetch("http://127.0.0.1:3199/api/agent/chat/stream", { method: "POST" })).status,
+      401
+    );
+
+    const ctxRes = await fetch("http://127.0.0.1:3199/api/projects/default/context", {
+      headers: authHeaders,
+    });
+    assert.equal(ctxRes.status, 200);
+
+    const gitStatusRes = await fetch("http://127.0.0.1:3199/api/projects/default/git/status", {
+      headers: authHeaders,
+    });
+    assert.equal(gitStatusRes.status, 200);
+    const gitStatusData = await gitStatusRes.json();
+    assert.equal(gitStatusData.isGitRepo, false);
+
+    const revertWithoutConfirm = await fetch(
+      "http://127.0.0.1:3199/api/projects/default/git/revert",
+      {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ confirm: false }),
+      }
+    );
+    assert.equal(revertWithoutConfirm.status, 400);
+
+    const schedRes = await fetch("http://127.0.0.1:3199/api/schedules", { headers: authHeaders });
+    assert.equal(schedRes.status, 200);
+    const schedData = await schedRes.json();
+    assert.equal(schedData.enabledByEnv, false);
+
+    const wfRes = await fetch("http://127.0.0.1:3199/api/workflows/templates", {
+      headers: authHeaders,
+    });
+    assert.equal(wfRes.status, 200);
+    const wfData = await wfRes.json();
+    assert.equal(wfData.templates.length, 4);
+
+    const streamUnconfigured = await fetch("http://127.0.0.1:3199/api/agent/chat/stream", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ message: "hello" }),
+    });
+    assert.equal(streamUnconfigured.status, 503);
   } finally {
     await stopServerProcess(srvDocker);
   }
