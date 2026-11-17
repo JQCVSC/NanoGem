@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -16,6 +18,25 @@ async function waitForHealth(url: string): Promise<Response> {
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`Timed out waiting for ${url}`);
+}
+
+async function stopServerProcess(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.killed) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Ignore
+      }
+      resolve();
+    }, 3000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
 }
 
 test("built server refuses non-loopback bind without NANOGEM_API_TOKEN", () => {
@@ -35,6 +56,10 @@ test("built server refuses non-loopback bind without NANOGEM_API_TOKEN", () => {
 });
 
 test("built server enforces auth and docker default, and supports explicit host mode", async () => {
+  const tmpStorage = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-smoke-store-"));
+  const dbPath = path.join(tmpStorage, "nanogem.db");
+  const projectsRoot = path.join(tmpStorage, "projects");
+
   const token = "smoke-test-token-1234567890";
   const srvDocker = spawn("node", [SERVER_BUNDLE], {
     env: {
@@ -44,6 +69,8 @@ test("built server enforces auth and docker default, and supports explicit host 
       PORT: "3199",
       NANOGEM_API_TOKEN: token,
       GEMINI_API_KEY: "MY_GEMINI_API_KEY",
+      NANOGEM_DB_PATH: dbPath,
+      NANOGEM_PROJECTS_ROOT: projectsRoot,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -139,8 +166,39 @@ test("built server enforces auth and docker default, and supports explicit host 
     assert.equal(authUnknownApi.status, 404);
     const unknownApiBody = await authUnknownApi.json();
     assert.equal(unknownApiBody.error, "API route not found");
+
+    // Stage 3: project creation, session creation, cross-project isolation
+    const createProjRes = await fetch("http://127.0.0.1:3199/api/projects", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ name: "Smoke Project", workspacePath: "smoke-proj" }),
+    });
+    assert.equal(createProjRes.status, 201);
+    const createdProj = await createProjRes.json();
+    assert.ok(createdProj.project.id);
+
+    const badProjRes = await fetch("http://127.0.0.1:3199/api/projects", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ name: "Escape", workspacePath: "../escape" }),
+    });
+    assert.equal(badProjRes.status, 400);
+
+    const createSessRes = await fetch("http://127.0.0.1:3199/api/sessions", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ projectId: createdProj.project.id, title: "Smoke Session" }),
+    });
+    assert.equal(createSessRes.status, 201);
+    const createdSess = await createSessRes.json();
+
+    const crossProjectSess = await fetch(
+      `http://127.0.0.1:3199/api/sessions/${createdSess.session.id}?projectId=default`,
+      { headers: authHeaders }
+    );
+    assert.equal(crossProjectSess.status, 403);
   } finally {
-    srvDocker.kill("SIGTERM");
+    await stopServerProcess(srvDocker);
   }
 
   const srvHost = spawn("node", [SERVER_BUNDLE], {
@@ -151,6 +209,8 @@ test("built server enforces auth and docker default, and supports explicit host 
       PORT: "3200",
       NANOGEM_EXECUTION_MODE: "host",
       NANOGEM_API_TOKEN: "",
+      NANOGEM_DB_PATH: dbPath,
+      NANOGEM_PROJECTS_ROOT: projectsRoot,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -158,6 +218,10 @@ test("built server enforces auth and docker default, and supports explicit host 
   try {
     const h2 = await (await waitForHealth("http://127.0.0.1:3200/api/health")).json();
     assert.equal(h2.executionMode, "host");
+
+    // Verify projects and sessions persisted across server restart
+    const persistedProjects = await (await fetch("http://127.0.0.1:3200/api/projects")).json();
+    assert.ok(persistedProjects.projects.some((p: any) => p.name === "Smoke Project"));
 
     const t2Res = await fetch("http://127.0.0.1:3200/api/workspace/terminal", {
       method: "POST",
@@ -170,6 +234,7 @@ test("built server enforces auth and docker default, and supports explicit host 
     const t2 = await t2Res.json();
     assert.equal(t2.output, "smoke");
   } finally {
-    srvHost.kill("SIGTERM");
+    await stopServerProcess(srvHost);
+    await fs.rm(tmpStorage, { recursive: true, force: true });
   }
 });

@@ -61,3 +61,24 @@ export interface RuntimeStatus {
     error?: string;
   } | null;
 }
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+  workspacePath: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionSummary {
+  id: string;
+  projectId: string;
+  title: string;
+  channel: string;
+  externalChatId: string | null;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+}

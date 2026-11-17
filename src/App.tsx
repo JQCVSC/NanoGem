@@ -1,11 +1,19 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { FolderPlus, MessageSquarePlus, FolderGit2, History } from "lucide-react";
 import { Header } from "./components/Header";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
-import { ChatMessage, WorkspaceFile, AgentSettings, RuntimeStatus } from "./types";
+import {
+  ChatMessage,
+  WorkspaceFile,
+  AgentSettings,
+  RuntimeStatus,
+  ProjectSummary,
+  SessionSummary,
+} from "./types";
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
 export default function App() {
@@ -18,6 +26,15 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [tokenInput, setTokenInput] = useState<string>(() => getStoredApiToken());
 
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string>("default");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState<boolean>(false);
+  const [newProjectName, setNewProjectName] = useState<string>("");
+  const [newProjectPath, setNewProjectPath] = useState<string>("");
+  const [projectError, setProjectError] = useState<string>("");
+
   const [agentSettings, setAgentSettings] = useState<AgentSettings>({
     model: "gemini-3.6-flash",
     temperature: 0,
@@ -29,10 +46,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
     sandboxDir: "/workspace",
   });
 
-  // Load initial workspace file tree
-  const loadWorkspaceFiles = useCallback(async () => {
+  const loadWorkspaceFiles = useCallback(async (projectId: string = activeProjectId) => {
     try {
-      const res = await apiFetch("/api/workspace/files");
+      const res = await apiFetch(`/api/workspace/files?projectId=${encodeURIComponent(projectId)}`);
       if (res.ok) {
         const data = await res.json();
         setWorkspaceFiles(data.files || []);
@@ -40,7 +56,75 @@ Always think step-by-step. Use your tools immediately when needed without asking
     } catch (err) {
       console.error("Failed to load workspace files:", err);
     }
+  }, [activeProjectId]);
+
+  const resumeSession = useCallback(async (sessionId: string, projectId: string) => {
+    try {
+      const res = await apiFetch(
+        `/api/sessions/${encodeURIComponent(sessionId)}?projectId=${encodeURIComponent(projectId)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setActiveSessionId(sessionId);
+        const restored: ChatMessage[] = (data.messages || []).map((m: any) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.createdAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          executionSteps: m.executionSteps || [],
+        }));
+        setMessages(restored);
+      }
+    } catch (err) {
+      console.error("Failed to resume session:", err);
+    }
   }, []);
+
+  const selectProject = useCallback(
+    async (projectId: string) => {
+      try {
+        const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/select`, {
+          method: "POST",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setActiveProjectId(projectId);
+        setWorkspaceFiles(data.files || []);
+        const projectSessions: SessionSummary[] = data.sessions || [];
+        setSessions(projectSessions);
+        const targetSession = projectSessions[0] || data.defaultSession;
+        if (targetSession) {
+          await resumeSession(targetSession.id, projectId);
+        } else {
+          setActiveSessionId(null);
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error("Failed to select project:", err);
+      }
+    },
+    [resumeSession]
+  );
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/projects");
+      if (res.ok) {
+        const data = await res.json();
+        const list: ProjectSummary[] = data.projects || [];
+        setProjects(list);
+        const targetId = list.some((p) => p.id === activeProjectId)
+          ? activeProjectId
+          : list[0]?.id || "default";
+        await selectProject(targetId);
+      }
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  }, [activeProjectId, selectProject]);
 
   const loadRuntimeStatus = useCallback(async () => {
     try {
@@ -66,22 +150,78 @@ Always think step-by-step. Use your tools immediately when needed without asking
       setIsAuthModalOpen(true);
     });
     loadRuntimeStatus();
-    loadWorkspaceFiles();
+    loadProjects();
     return unsubscribe;
-  }, [loadRuntimeStatus, loadWorkspaceFiles]);
+  }, [loadRuntimeStatus, loadProjects]);
 
   const handleSaveApiToken = async (e: React.FormEvent) => {
     e.preventDefault();
     setStoredApiToken(tokenInput);
     setIsAuthModalOpen(false);
     await loadRuntimeStatus();
-    await loadWorkspaceFiles();
+    await loadProjects();
   };
 
-  // Handle Agent Chat Message Submission
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProjectError("");
+    if (!newProjectName.trim()) {
+      setProjectError("Project name is required.");
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newProjectName.trim(),
+          workspacePath: newProjectPath.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setProjectError(data.error || "Failed to create project.");
+        return;
+      }
+      setNewProjectName("");
+      setNewProjectPath("");
+      setIsNewProjectModalOpen(false);
+      const listRes = await apiFetch("/api/projects");
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        setProjects(listData.projects || []);
+      }
+      await selectProject(data.project.id);
+    } catch (err: any) {
+      setProjectError(err.message || "Failed to create project.");
+    }
+  };
+
+  const handleStartNewSession = async () => {
+    try {
+      const res = await apiFetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          title: `Session ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+          model: agentSettings.model,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessions((prev) => [data.session, ...prev]);
+        setActiveSessionId(data.session.id);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error("Failed to create new session:", err);
+    }
+  };
+
   const handleSendMessage = async (text: string) => {
     const userMsgId = Math.random().toString(36).substring(2, 9);
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     const newUserMsg: ChatMessage = {
       id: userMsgId,
@@ -90,13 +230,12 @@ Always think step-by-step. Use your tools immediately when needed without asking
       timestamp: timeStr,
     };
 
-    const updatedMessages = [...messages, newUserMsg];
-    setMessages(updatedMessages);
+    const previousMessages = [...messages];
+    setMessages([...previousMessages, newUserMsg]);
     setIsExecuting(true);
 
     try {
-      // Build previous turn context for backend
-      const history = updatedMessages.map((m) => ({
+      const history = previousMessages.map((m) => ({
         role: m.role,
         content: m.content,
       }));
@@ -108,7 +247,10 @@ Always think step-by-step. Use your tools immediately when needed without asking
           message: text,
           history,
           model: agentSettings.model,
+          temperature: agentSettings.temperature,
           systemInstruction: agentSettings.systemInstruction,
+          projectId: activeProjectId,
+          sessionId: activeSessionId || undefined,
         }),
       });
 
@@ -118,12 +260,16 @@ Always think step-by-step. Use your tools immediately when needed without asking
         throw new Error(data.error || "Failed to communicate with NanoGemini Agent");
       }
 
+      if (data.sessionId && data.sessionId !== activeSessionId) {
+        setActiveSessionId(data.sessionId);
+      }
+
       const agentMsgId = Math.random().toString(36).substring(2, 9);
       const newAgentMsg: ChatMessage = {
         id: agentMsgId,
         role: "assistant",
         content: data.text || "NanoGemini completed execution.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         executionSteps: data.executionSteps || [],
       };
 
@@ -140,7 +286,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
           id: errorMsgId,
           role: "assistant",
           content: `⚠️ Error executing agent task: ${err.message}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
     } finally {
@@ -148,43 +294,50 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
-  // Reset Sandbox Workspace
   const handleResetWorkspace = async () => {
-    if (window.confirm("Are you sure you want to reset the /workspace/ directory to default state? All created files will be cleared.")) {
+    if (
+      window.confirm(
+        "Are you sure you want to reset this project's /workspace/ directory? All created files will be cleared."
+      )
+    ) {
       try {
-        const res = await apiFetch("/api/workspace/reset", { method: "POST" });
+        const res = await apiFetch("/api/workspace/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: activeProjectId }),
+        });
         const data = await res.json();
         if (data.files) {
           setWorkspaceFiles(data.files);
         }
-        setMessages([]);
       } catch (err) {
         console.error("Reset failed:", err);
       }
     }
   };
 
-  // Save File directly in Workspace Editor
   const handleSaveWorkspaceFile = async (path: string, content: string) => {
     try {
       await apiFetch("/api/workspace/file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, content }),
+        body: JSON.stringify({ projectId: activeProjectId, path, content }),
       });
-      await loadWorkspaceFiles();
+      await loadWorkspaceFiles(activeProjectId);
     } catch (err) {
       console.error("Failed to save file:", err);
     }
   };
 
-  // Delete File in Workspace Editor
   const handleDeleteWorkspaceFile = async (path: string) => {
     try {
-      await apiFetch(`/api/workspace/file?path=${encodeURIComponent(path)}`, {
-        method: "DELETE",
-      });
-      await loadWorkspaceFiles();
+      await apiFetch(
+        `/api/workspace/file?projectId=${encodeURIComponent(activeProjectId)}&path=${encodeURIComponent(path)}`,
+        {
+          method: "DELETE",
+        }
+      );
+      await loadWorkspaceFiles(activeProjectId);
     } catch (err) {
       console.error("Failed to delete file:", err);
     }
@@ -202,6 +355,72 @@ Always think step-by-step. Use your tools immediately when needed without asking
         isExecuting={isExecuting}
       />
 
+      {/* Project & Session Switcher Bar */}
+      <div className="bg-slate-900/70 border-b border-slate-800 px-4 py-2 text-xs font-mono">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-slate-400">
+              <FolderGit2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Project:</span>
+              <select
+                aria-label="Active Project"
+                value={activeProjectId}
+                onChange={(e) => selectProject(e.target.value)}
+                disabled={isExecuting}
+                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-emerald-500"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setProjectError("");
+                setIsNewProjectModalOpen(true);
+              }}
+              disabled={isExecuting}
+              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-emerald-400" />
+              <span>New Project</span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-slate-400">
+              <History className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Session:</span>
+              <select
+                aria-label="Active Session"
+                value={activeSessionId || ""}
+                onChange={(e) => resumeSession(e.target.value, activeProjectId)}
+                disabled={isExecuting || sessions.length === 0}
+                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-emerald-500"
+              >
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={handleStartNewSession}
+              disabled={isExecuting}
+              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" />
+              <span>New Session</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <main className="flex-1 overflow-hidden">
         {activeTab === "chat" && (
           <AgentChat
@@ -214,14 +433,17 @@ Always think step-by-step. Use your tools immediately when needed without asking
 
         {activeTab === "files" && (
           <FileWorkspace
+            projectId={activeProjectId}
             files={workspaceFiles}
-            onRefreshFiles={loadWorkspaceFiles}
+            onRefreshFiles={() => loadWorkspaceFiles(activeProjectId)}
             onSaveFile={handleSaveWorkspaceFile}
             onDeleteFile={handleDeleteWorkspaceFile}
           />
         )}
 
-        {activeTab === "terminal" && <InteractiveTerminal />}
+        {activeTab === "terminal" && (
+          <InteractiveTerminal projectId={activeProjectId} sessionId={activeSessionId} />
+        )}
 
         {activeTab === "export" && <CodebaseExport />}
       </main>
@@ -232,6 +454,55 @@ Always think step-by-step. Use your tools immediately when needed without asking
         settings={agentSettings}
         onSaveSettings={(newSettings) => setAgentSettings(newSettings)}
       />
+
+      {isNewProjectModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+          <form
+            onSubmit={handleCreateProject}
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
+          >
+            <h2 className="text-sm font-bold text-slate-100">Create Isolated Project</h2>
+            <div className="space-y-2">
+              <label className="block text-xs text-slate-300">Project Name</label>
+              <input
+                type="text"
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                placeholder="e.g., api-service"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block text-xs text-slate-300">
+                Subdirectory inside approved root (optional)
+              </label>
+              <input
+                type="text"
+                value={newProjectPath}
+                onChange={(e) => setNewProjectPath(e.target.value)}
+                placeholder="e.g., api-service"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+            {projectError && <p className="text-xs text-rose-400">{projectError}</p>}
+            <div className="flex justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setIsNewProjectModalOpen(false)}
+                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs"
+              >
+                Create Project
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {isAuthModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">

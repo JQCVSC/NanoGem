@@ -23,3 +23,12 @@
 - Added `executeSandboxCommandDetailed` in `src/server/sandboxRuntime.ts` so `agentService.ts` gets deterministic command exit/failure status without changing `executeSandboxCommand`.
 - Refactored `server.ts` `/api/agent/chat` to call `runGeminiAgent` rather than duplicating the Gemini loop, preserving browser API compatibility.
 - Added unit tests in `tests/agentService.test.ts` covering direct response, sandboxed tool calls, tool/API failures, and maximum-turn termination.
+
+## Stage 3 — Persistent Project & Session Storage
+- Added `src/storage/database.ts` using Node's built-in `node:sqlite` (`DatabaseSync`) with migration tracking (`schema_migrations`), WAL mode, and foreign keys (`projects`, `sessions`, `messages`, `execution_events`). No API keys or tokens are stored in SQLite.
+- Added `src/storage/projectStore.ts` validating project workspace paths against an approved root (`NANOGEM_PROJECTS_ROOT`), preventing overlapping/escaping project directories, migrating `./sandbox_workspace` as `"default"`, and scoping workspace file/sandbox access per project.
+- Added `src/storage/sessionStore.ts` enforcing single-project ownership on every session, message, and execution event, and supporting session creation, listing, resumption, and history retrieval.
+- Added project/session REST endpoints (`/api/projects`, `/api/projects/:id/select`, `/api/sessions`, `/api/sessions/:id`) and scoped `/api/workspace/*` and `/api/agent/chat` to the active project & session in `server.ts`.
+- Added project/session selector and creation UI in `src/App.tsx`, `src/components/FileWorkspace.tsx`, `src/components/InteractiveTerminal.tsx`, and `src/types.ts`.
+- Added `.nanogem/` and `nanogem_workspaces/` to `.gitignore` and `.dockerignore`.
+- Added persistence-across-restart and cross-project isolation tests in `tests/storage.test.ts` and `tests/smoke.test.ts`.

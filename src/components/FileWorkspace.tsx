@@ -19,6 +19,7 @@ import { WorkspaceFile } from "../types";
 import { apiFetch } from "../api";
 
 interface FileWorkspaceProps {
+  projectId: string;
   files: WorkspaceFile[];
   onRefreshFiles: () => void;
   onSaveFile: (path: string, content: string) => Promise<void>;
@@ -26,6 +27,7 @@ interface FileWorkspaceProps {
 }
 
 export const FileWorkspace: React.FC<FileWorkspaceProps> = ({
+  projectId,
   files,
   onRefreshFiles,
   onSaveFile,
@@ -40,15 +42,27 @@ export const FileWorkspace: React.FC<FileWorkspaceProps> = ({
   const [viewMode, setViewMode] = useState<"code" | "preview">("code");
 
   useEffect(() => {
+    setSelectedFilePath((prev) => {
+      if (files.some((f) => !f.isDirectory && f.path === prev)) return prev;
+      const firstFile = files.find((f) => !f.isDirectory);
+      return firstFile ? firstFile.path : null;
+    });
+  }, [projectId, files]);
+
+  useEffect(() => {
     if (selectedFilePath) {
       loadFileContent(selectedFilePath);
+    } else {
+      setFileContent("");
     }
-  }, [selectedFilePath]);
+  }, [selectedFilePath, projectId]);
 
   const loadFileContent = async (path: string) => {
     setIsLoading(true);
     try {
-      const res = await apiFetch(`/api/workspace/file?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(
+        `/api/workspace/file?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(path)}`
+      );
       if (res.ok) {
         const data = await res.json();
         setFileContent(data.content || "");

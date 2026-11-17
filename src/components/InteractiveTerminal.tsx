@@ -10,7 +10,15 @@ interface TerminalHistoryItem {
   status: "success" | "error";
 }
 
-export const InteractiveTerminal: React.FC = () => {
+interface InteractiveTerminalProps {
+  projectId: string;
+  sessionId?: string | null;
+}
+
+export const InteractiveTerminal: React.FC<InteractiveTerminalProps> = ({
+  projectId,
+  sessionId,
+}) => {
   const [command, setCommand] = useState("");
   const [history, setHistory] = useState<TerminalHistoryItem[]>([
     {
@@ -38,7 +46,11 @@ export const InteractiveTerminal: React.FC = () => {
       const res = await apiFetch("/api/workspace/terminal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: cmdToRun }),
+        body: JSON.stringify({
+          command: cmdToRun,
+          projectId,
+          sessionId: sessionId || undefined,
+        }),
       });
 
       const data = await res.json();
@@ -133,7 +145,7 @@ export const InteractiveTerminal: React.FC = () => {
           <div key={item.id} className="space-y-1">
             {/* Command Line Prompt */}
             <div className="flex items-center space-x-2 text-slate-300">
-              <span className="text-emerald-400 font-bold">root@nanogemini-sandbox</span>
+              <span className="text-emerald-400 font-bold">sandbox@nanogem</span>
               <span className="text-slate-500">:</span>
               <span className="text-blue-400 font-bold">/workspace</span>
               <span className="text-slate-400">#</span>

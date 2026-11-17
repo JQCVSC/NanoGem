@@ -7,6 +7,8 @@ coverage
 .env.*
 !.env.example
 sandbox_workspace
+nanogem_workspaces
+.nanogem
 dist-image
 *.tar.gz
 *.log

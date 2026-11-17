@@ -20,8 +20,10 @@ import {
   checkDockerAvailability,
   executeSandboxCommand,
   loadSandboxConfig,
-  resolveSafeWorkspacePath,
 } from "./src/server/sandboxRuntime.ts";
+import { openNanoGemDatabase } from "./src/storage/database.ts";
+import { ProjectStore, type ProjectRecord } from "./src/storage/projectStore.ts";
+import { SessionStore, type SessionRecord } from "./src/storage/sessionStore.ts";
 
 const app = express();
 
@@ -29,10 +31,20 @@ app.disable("x-powered-by");
 app.use(applySecurityHeaders);
 app.use(express.json({ limit: "10mb" }));
 
-// 1. Setup Sandbox Workspace Directory & Runtime Configuration
+// 1. Setup Sandbox Workspace Directory, Persistent Storage & Runtime Configuration
 const WORKSPACE_DIR = path.resolve(process.cwd(), "sandbox_workspace");
+const PROJECTS_ROOT = path.resolve(
+  process.env.NANOGEM_PROJECTS_ROOT?.trim() || path.join(process.cwd(), "nanogem_workspaces")
+);
+const DB_PATH = path.resolve(
+  process.env.NANOGEM_DB_PATH?.trim() || path.join(process.cwd(), ".nanogem", "nanogem.db")
+);
+
 const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
 const securityConfig = loadServerSecurityConfig();
+const db = openNanoGemDatabase(DB_PATH);
+const projectStore = new ProjectStore(db, PROJECTS_ROOT);
+const sessionStore = new SessionStore(db);
 
 app.use("/api", createApiAuthMiddleware(securityConfig));
 
@@ -186,23 +198,47 @@ if __name__ == "__main__":
 }
 
 ensureWorkspace();
+projectStore.ensureDefaultProject(WORKSPACE_DIR);
+sessionStore.ensureDefaultSession("default");
 
-// Helper for security path checking
-async function resolveSafePath(filePath: string): Promise<string | null> {
-  return resolveSafeWorkspacePath(WORKSPACE_DIR, filePath);
-}
+function resolveProjectContext(
+  rawProjectId: unknown,
+  rawSessionId?: unknown
+): {
+  project?: ProjectRecord;
+  session?: SessionRecord;
+  errorStatus?: number;
+  errorMessage?: string;
+} {
+  const projectId =
+    typeof rawProjectId === "string" && rawProjectId.trim()
+      ? rawProjectId.trim()
+      : "default";
+  const project = projectStore.getProjectById(projectId);
+  if (!project) {
+    return { errorStatus: 404, errorMessage: `Project "${projectId}" not found.` };
+  }
 
-// 3. Workspace Utility Functions
-async function executeSystemCommand(command: string): Promise<string> {
-  return executeSandboxCommand(command, sandboxConfig);
-}
+  if (typeof rawSessionId === "string" && rawSessionId.trim()) {
+    const sessionId = rawSessionId.trim();
+    const session = sessionStore.getSession(sessionId);
+    if (!session) {
+      return { errorStatus: 404, errorMessage: `Session "${sessionId}" not found.` };
+    }
+    if (session.projectId !== project.id) {
+      return {
+        errorStatus: 403,
+        errorMessage: "Forbidden: session does not belong to the selected project.",
+      };
+    }
+    return { project, session };
+  }
 
-async function writeLocalFile(filePath: string, content: string): Promise<string> {
-  const result = await writeWorkspaceFile(WORKSPACE_DIR, filePath, content);
-  return result.output;
+  return { project };
 }
 
 async function getWorkspaceFilesTree(dir = WORKSPACE_DIR, relative = ""): Promise<any[]> {
+  if (!existsSync(dir)) return [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const results = [];
 
@@ -468,12 +504,110 @@ docker run --rm --init \\
   res.json(codebase);
 });
 
+// --- PROJECTS & SESSIONS ENDPOINTS ---
+
+app.get("/api/projects", (_req, res) => {
+  res.json({
+    projects: projectStore.listProjects(),
+    approvedRoot: projectStore.approvedRoot,
+  });
+});
+
+app.post("/api/projects", (req, res) => {
+  try {
+    const { name, workspacePath } = req.body || {};
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "Project name is required" });
+    }
+    if (workspacePath !== undefined && typeof workspacePath !== "string") {
+      return res.status(400).json({ error: "workspacePath must be a string" });
+    }
+
+    const project = projectStore.createProject({ name, workspacePath });
+    const session = sessionStore.ensureDefaultSession(project.id);
+    res.status(201).json({ project, session });
+  } catch (error: any) {
+    const message = error?.message || "Failed to create project";
+    const status = /Security Error|Invalid|conflicts/i.test(message) ? 400 : 500;
+    res.status(status).json({ error: message });
+  }
+});
+
+app.post("/api/projects/:projectId/select", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const defaultSession = sessionStore.ensureDefaultSession(project.id);
+    const sessions = sessionStore.listSessions(project.id);
+    const files = await getWorkspaceFilesTree(project.workspacePath);
+    res.json({ project, defaultSession, sessions, files });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/sessions", (req, res) => {
+  const projectId = typeof req.query.projectId === "string" ? req.query.projectId.trim() : undefined;
+  if (projectId && !projectStore.getProjectById(projectId)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  res.json({ sessions: sessionStore.listSessions(projectId) });
+});
+
+app.post("/api/sessions", (req, res) => {
+  try {
+    const { projectId = "default", title, model } = req.body || {};
+    if (typeof projectId !== "string" || !projectId.trim()) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+    if (!projectStore.getProjectById(projectId.trim())) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const session = sessionStore.createSession({
+      projectId: projectId.trim(),
+      title: typeof title === "string" ? title : undefined,
+      model: typeof model === "string" ? model : undefined,
+      channel: "browser",
+    });
+    res.status(201).json({ session, messages: [], events: [] });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/sessions/:sessionId", (req, res) => {
+  try {
+    const expectedProjectId =
+      typeof req.query.projectId === "string" && req.query.projectId.trim()
+        ? req.query.projectId.trim()
+        : undefined;
+    const details = sessionStore.getSessionDetails(req.params.sessionId, expectedProjectId);
+    if (!details) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+    res.json(details);
+  } catch (error: any) {
+    if (/Security Error/i.test(error?.message || "")) {
+      return res.status(403).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET Workspace File Tree
 app.get("/api/workspace/files", async (req, res) => {
   try {
-    ensureWorkspace();
-    const tree = await getWorkspaceFilesTree();
-    res.json({ files: tree });
+    const ctx = resolveProjectContext(req.query.projectId, req.query.sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
+    if (ctx.project.isDefault) {
+      ensureWorkspace();
+    }
+    const tree = await getWorkspaceFilesTree(ctx.project.workspacePath);
+    res.json({ files: tree, projectId: ctx.project.id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -482,14 +616,18 @@ app.get("/api/workspace/files", async (req, res) => {
 // GET File Content
 app.get("/api/workspace/file", async (req, res) => {
   try {
+    const ctx = resolveProjectContext(req.query.projectId, req.query.sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).json({ error: "Missing path query parameter" });
 
-    const safePath = await resolveSafePath(filePath);
+    const safePath = await projectStore.resolveProjectFile(ctx.project.id, filePath);
     if (!safePath) return res.status(403).json({ error: "Access denied" });
 
     const content = await fs.readFile(safePath, "utf-8");
-    res.json({ path: filePath, content });
+    res.json({ path: filePath, content, projectId: ctx.project.id });
   } catch (error: any) {
     if (error?.code === "ENOENT") {
       return res.status(404).json({ error: "File not found" });
@@ -504,7 +642,11 @@ app.get("/api/workspace/file", async (req, res) => {
 // POST Save/Create File
 app.post("/api/workspace/file", async (req, res) => {
   try {
-    const { path: filePath, content } = req.body;
+    const { path: filePath, content, projectId, sessionId } = req.body || {};
+    const ctx = resolveProjectContext(projectId, sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
     if (!filePath || typeof filePath !== "string") {
       return res.status(400).json({ error: "Missing file path" });
     }
@@ -512,13 +654,13 @@ app.post("/api/workspace/file", async (req, res) => {
       return res.status(400).json({ error: "File content must be a string" });
     }
 
-    const safePath = await resolveSafePath(filePath);
+    const safePath = await projectStore.resolveProjectFile(ctx.project.id, filePath);
     if (!safePath) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const result = await writeLocalFile(filePath, content ?? "");
-    res.json({ result });
+    const writeResult = await writeWorkspaceFile(ctx.project.workspacePath, filePath, content ?? "");
+    res.json({ result: writeResult.output, projectId: ctx.project.id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -527,14 +669,18 @@ app.post("/api/workspace/file", async (req, res) => {
 // DELETE File
 app.delete("/api/workspace/file", async (req, res) => {
   try {
+    const ctx = resolveProjectContext(req.query.projectId, req.query.sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).json({ error: "Missing file path" });
 
-    const safePath = await resolveSafePath(filePath);
+    const safePath = await projectStore.resolveProjectFile(ctx.project.id, filePath);
     if (!safePath) return res.status(403).json({ error: "Access denied" });
 
     await fs.rm(safePath, { recursive: true, force: true });
-    res.json({ success: true });
+    res.json({ success: true, projectId: ctx.project.id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -543,13 +689,18 @@ app.delete("/api/workspace/file", async (req, res) => {
 // POST Run Manual Terminal Command
 app.post("/api/workspace/terminal", async (req, res) => {
   try {
-    const { command } = req.body;
+    const { command, projectId, sessionId } = req.body || {};
+    const ctx = resolveProjectContext(projectId, sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
     if (typeof command !== "string" || !command.trim()) {
       return res.status(400).json({ error: "Missing or invalid command" });
     }
 
-    const output = await executeSystemCommand(command);
-    res.json({ output });
+    const projectSandbox = projectStore.buildSandboxConfigForProject(sandboxConfig, ctx.project.id);
+    const output = await executeSandboxCommand(command, projectSandbox);
+    res.json({ output, projectId: ctx.project.id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -558,10 +709,19 @@ app.post("/api/workspace/terminal", async (req, res) => {
 // POST Reset Workspace
 app.post("/api/workspace/reset", async (req, res) => {
   try {
-    await fs.rm(WORKSPACE_DIR, { recursive: true, force: true });
-    ensureWorkspace();
-    const tree = await getWorkspaceFilesTree();
-    res.json({ message: "Workspace reset successfully", files: tree });
+    const { projectId } = req.body || {};
+    const ctx = resolveProjectContext(projectId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
+    }
+    await fs.rm(ctx.project.workspacePath, { recursive: true, force: true });
+    if (ctx.project.isDefault) {
+      ensureWorkspace();
+    } else {
+      await fs.mkdir(ctx.project.workspacePath, { recursive: true });
+    }
+    const tree = await getWorkspaceFilesTree(ctx.project.workspacePath);
+    res.json({ message: "Workspace reset successfully", files: tree, projectId: ctx.project.id });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -572,15 +732,22 @@ app.post("/api/agent/chat", async (req, res) => {
   try {
     const {
       message,
-      history = [],
+      history,
       model = DEFAULT_GEMINI_MODEL,
       temperature = 0,
       systemInstruction = DEFAULT_SYSTEM_INSTRUCTION,
       maxTurns,
-    } = req.body;
+      projectId,
+      sessionId,
+    } = req.body || {};
 
     if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "Message is required" });
+    }
+
+    const ctx = resolveProjectContext(projectId, sessionId);
+    if (!ctx.project) {
+      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
     }
 
     if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
@@ -589,19 +756,55 @@ app.post("/api/agent/chat", async (req, res) => {
       });
     }
 
+    const activeSession =
+      ctx.session ?? sessionStore.ensureDefaultSession(ctx.project.id);
+
+    const persistedDetails = sessionStore.getSessionDetails(
+      activeSession.id,
+      ctx.project.id
+    );
+    const effectiveHistory = Array.isArray(history)
+      ? history
+      : (persistedDetails?.messages || []).map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+    sessionStore.appendMessage({
+      sessionId: activeSession.id,
+      projectId: ctx.project.id,
+      role: "user",
+      content: message,
+    });
+
+    const projectSandbox = projectStore.buildSandboxConfigForProject(
+      sandboxConfig,
+      ctx.project.id
+    );
+
     const result = await runGeminiAgent({
       message,
-      history: Array.isArray(history) ? history : [],
+      history: effectiveHistory,
       model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
       temperature: typeof temperature === "number" ? temperature : 0,
       systemInstruction:
         typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION,
       maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
-      sandboxConfig,
+      sandboxConfig: projectSandbox,
     });
 
+    sessionStore.appendMessage({
+      sessionId: activeSession.id,
+      projectId: ctx.project.id,
+      role: "assistant",
+      content: result.text,
+      executionSteps: result.executionSteps,
+    });
+    sessionStore.appendExecutionEvents(activeSession.id, ctx.project.id, result.events);
+    projectStore.touchProject(ctx.project.id);
+
     // Get updated workspace files to send back to UI
-    const updatedFiles = await getWorkspaceFilesTree();
+    const updatedFiles = await getWorkspaceFilesTree(ctx.project.workspacePath);
 
     res.json({
       text: result.text,
@@ -610,6 +813,8 @@ app.post("/api/agent/chat", async (req, res) => {
       turns: result.turns,
       maxTurnsReached: result.maxTurnsReached,
       files: updatedFiles,
+      projectId: ctx.project.id,
+      sessionId: activeSession.id,
     });
   } catch (error: any) {
     console.error("Agent chat error:", error);
@@ -640,7 +845,7 @@ export async function startServer() {
     });
   }
 
-  return app.listen(securityConfig.port, securityConfig.host, () => {
+  const server = app.listen(securityConfig.port, securityConfig.host, () => {
     console.log(
       `[NanoGemini Server] Running on http://${securityConfig.host}:${securityConfig.port} ` +
         `(execution=${sandboxConfig.executionMode}, auth=${securityConfig.authRequired ? "enabled" : "loopback-only"})`
@@ -657,6 +862,22 @@ export async function startServer() {
       );
     }
   });
+
+  const shutdown = () => {
+    server.closeAllConnections?.();
+    server.close(() => {
+      try {
+        db.close();
+      } catch {
+        // Ignore if already closed
+      }
+      process.exit(0);
+    });
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+
+  return server;
 }
 
 if (process.env.NANOGEM_SKIP_LISTEN !== "1") {
