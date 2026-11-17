@@ -14,7 +14,7 @@ import { apiFetch } from "../api";
 
 export const CodebaseExport: React.FC = () => {
   const [source, setSource] = useState<NanoGeminiSource | null>(null);
-  const [activeFile, setActiveFile] = useState<keyof NanoGeminiSource>("agentPy");
+  const [activeFile, setActiveFile] = useState<keyof NanoGeminiSource>("readme");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -44,6 +44,7 @@ export const CodebaseExport: React.FC = () => {
   };
 
   const FILE_TITLES: Record<keyof NanoGeminiSource, { name: string; desc: string }> = {
+    readme: { name: "README.md", desc: "Project documentation, architecture breakdown & quickstart guide" },
     agentPy: { name: "agent.py", desc: "The core Gemini Agent brain & function calling execution loop" },
     dockerfile: { name: "Dockerfile", desc: "Docker sandbox environment configuration (Node.js 22 + Python 3 + Git)" },
     requirements: { name: "requirements.txt", desc: "Python SDK dependencies (google-genai, python-dotenv)" },

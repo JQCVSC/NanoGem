@@ -30,6 +30,7 @@ export interface ChatMessage {
 }
 
 export interface NanoGeminiSource {
+  readme: string;
   dockerfile: string;
   requirements: string;
   envExample: string;

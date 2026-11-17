@@ -1,3 +1,5 @@
+![NanoGemini Banner](https://i.imgur.com/yAe5JTL.jpeg)
+
 # ♊ NanoGemini
 
 **A highly-secure, Docker-sandboxed AI agent runtime built natively for Google Gemini.**
