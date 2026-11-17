@@ -30,6 +30,13 @@ export interface DockerStatus {
   error?: string;
 }
 
+export interface SandboxCommandResult {
+  ok: boolean;
+  output: string;
+  exitCode: number | null;
+  error?: string;
+}
+
 const DEFAULT_DOCKER_IMAGE = "nanogem-sandbox:latest";
 const DEFAULT_DOCKER_USER = "1000:1000";
 const DEFAULT_DOCKER_NETWORK = "none";
@@ -311,11 +318,14 @@ function cleanupDockerContainer(containerName: string): void {
   }
 }
 
-async function executeInDocker(command: string, config: SandboxConfig): Promise<string> {
+async function executeInDockerDetailed(
+  command: string,
+  config: SandboxConfig
+): Promise<SandboxCommandResult> {
   const containerName = `nanogem-exec-${crypto.randomUUID()}`;
   const args = buildDockerRunArgs(command, config, containerName);
 
-  return new Promise<string>((resolve) => {
+  return new Promise<SandboxCommandResult>((resolve) => {
     let stdout = "";
     let stderr = "";
     let truncated = false;
@@ -327,20 +337,19 @@ async function executeInDocker(command: string, config: SandboxConfig): Promise<
       shell: false,
     });
 
-    const finish = (message: string) => {
+    const finish = (result: SandboxCommandResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(message);
+      resolve(result);
     };
 
     const timer = setTimeout(() => {
       timedOut = true;
       cleanupDockerContainer(containerName);
       child.kill("SIGKILL");
-      finish(
-        `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds (container terminated).`
-      );
+      const message = `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds (container terminated).`;
+      finish({ ok: false, output: message, exitCode: null, error: message });
     }, config.timeoutMs);
 
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -357,18 +366,19 @@ async function executeInDocker(command: string, config: SandboxConfig): Promise<
 
     child.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "ENOENT") {
-        finish(
-          "Sandbox Error: Docker CLI ('docker') was not found on PATH. NanoGem requires Docker by default. Install/start Docker and run ./scripts/build-sandbox.sh, or explicitly set NANOGEM_EXECUTION_MODE=host to run without container isolation."
-        );
+        const message =
+          "Sandbox Error: Docker CLI ('docker') was not found on PATH. NanoGem requires Docker by default. Install/start Docker and run ./scripts/build-sandbox.sh, or explicitly set NANOGEM_EXECUTION_MODE=host to run without container isolation.";
+        finish({ ok: false, output: message, exitCode: null, error: message });
         return;
       }
-      finish(`Sandbox Error: Failed to start Docker container: ${err.message}`);
+      const message = `Sandbox Error: Failed to start Docker container: ${err.message}`;
+      finish({ ok: false, output: message, exitCode: null, error: message });
     });
 
     child.on("close", (code) => {
       if (timedOut) return;
       if (code === 0) {
-        finish(formatCommandOutput(stdout, stderr, truncated));
+        finish({ ok: true, output: formatCommandOutput(stdout, stderr, truncated), exitCode: 0 });
         return;
       }
       const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
@@ -378,7 +388,8 @@ async function executeInDocker(command: string, config: SandboxConfig): Promise<
           : /Cannot connect to the Docker daemon|is the docker daemon running/i.test(stderr)
             ? "\nHint: Ensure the Docker daemon is running."
             : "";
-      finish(`Error executing command (exit code ${code ?? "unknown"}):\n${combined}${hint}`.trim());
+      const message = `Error executing command (exit code ${code ?? "unknown"}):\n${combined}${hint}`.trim();
+      finish({ ok: false, output: message, exitCode: code, error: message });
     });
   });
 }
@@ -401,7 +412,10 @@ function buildSanitizedHostEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Pro
   return safeEnv;
 }
 
-async function executeOnHost(command: string, config: SandboxConfig): Promise<string> {
+async function executeOnHostDetailed(
+  command: string,
+  config: SandboxConfig
+): Promise<SandboxCommandResult> {
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd: config.workspaceDir,
@@ -409,26 +423,38 @@ async function executeOnHost(command: string, config: SandboxConfig): Promise<st
       maxBuffer: config.maxOutputBytes,
       env: buildSanitizedHostEnv(),
     });
-    return formatCommandOutput(stdout, stderr, false);
+    return { ok: true, output: formatCommandOutput(stdout, stderr, false), exitCode: 0 };
   } catch (error: any) {
     if (error.killed) {
-      return `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds.`;
+      const message = `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds.`;
+      return { ok: false, output: message, exitCode: null, error: message };
     }
-    return `Error executing command: ${error.message}\n${error.stderr || ""}`.trim();
+    const message = `Error executing command: ${error.message}\n${error.stderr || ""}`.trim();
+    const exitCode = typeof error.code === "number" ? error.code : null;
+    return { ok: false, output: message, exitCode, error: message };
   }
+}
+
+export async function executeSandboxCommandDetailed(
+  command: string,
+  config: SandboxConfig
+): Promise<SandboxCommandResult> {
+  if (typeof command !== "string" || !command.trim()) {
+    const message = "Error: Command must be a non-empty string.";
+    return { ok: false, output: message, exitCode: null, error: message };
+  }
+  if (config.executionMode === "host") {
+    return executeOnHostDetailed(command, config);
+  }
+  return executeInDockerDetailed(command, config);
 }
 
 export async function executeSandboxCommand(
   command: string,
   config: SandboxConfig
 ): Promise<string> {
-  if (typeof command !== "string" || !command.trim()) {
-    return "Error: Command must be a non-empty string.";
-  }
-  if (config.executionMode === "host") {
-    return executeOnHost(command, config);
-  }
-  return executeInDocker(command, config);
+  const result = await executeSandboxCommandDetailed(command, config);
+  return result.output;
 }
 
 function runDockerProbe(args: string[], timeoutMs = 3000): Promise<{ ok: boolean; stdout: string; stderr: string }> {

@@ -3,8 +3,14 @@ import express from "express";
 import path from "path";
 import fs from "fs/promises";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { createServer as createViteServer } from "vite";
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_SYSTEM_INSTRUCTION,
+  isConfiguredGeminiApiKey,
+  runGeminiAgent,
+  writeWorkspaceFile,
+} from "./src/agent/agentService.ts";
 import {
   applySecurityHeaders,
   createApiAuthMiddleware,
@@ -23,23 +29,7 @@ app.disable("x-powered-by");
 app.use(applySecurityHeaders);
 app.use(express.json({ limit: "10mb" }));
 
-// 1. Initialize Gemini Client
-const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.warn("GEMINI_API_KEY environment variable is not set.");
-  }
-  return new GoogleGenAI({
-    apiKey: apiKey || "",
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build",
-      },
-    },
-  });
-};
-
-// 2. Setup Sandbox Workspace Directory & Runtime Configuration
+// 1. Setup Sandbox Workspace Directory & Runtime Configuration
 const WORKSPACE_DIR = path.resolve(process.cwd(), "sandbox_workspace");
 const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
 const securityConfig = loadServerSecurityConfig();
@@ -208,18 +198,8 @@ async function executeSystemCommand(command: string): Promise<string> {
 }
 
 async function writeLocalFile(filePath: string, content: string): Promise<string> {
-  const safePath = await resolveSafePath(filePath);
-  if (!safePath) {
-    return "Security Error: Cannot write files outside of /workspace/";
-  }
-  try {
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, content, "utf-8");
-    const relativePath = path.relative(WORKSPACE_DIR, safePath);
-    return `Success: Wrote to /workspace/${relativePath}`;
-  } catch (error: any) {
-    return `Error writing file: ${error.message}`;
-  }
+  const result = await writeWorkspaceFile(WORKSPACE_DIR, filePath, content);
+  return result.output;
 }
 
 async function getWorkspaceFilesTree(dir = WORKSPACE_DIR, relative = ""): Promise<any[]> {
@@ -255,44 +235,6 @@ async function getWorkspaceFilesTree(dir = WORKSPACE_DIR, relative = ""): Promis
 
   return results.sort((a, b) => (a.isDirectory === b.isDirectory ? a.name.localeCompare(b.name) : a.isDirectory ? -1 : 1));
 }
-
-// 4. Gemini Function Declarations for NanoGemini Agent
-const agentFunctionDeclarations: FunctionDeclaration[] = [
-  {
-    name: "execute_system_command",
-    description:
-      "Executes a bash terminal command in the /workspace/ directory and returns the console output.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        command: {
-          type: Type.STRING,
-          description: "The bash command to run (e.g., 'npm init -y', 'python app.py', or 'ls -la')",
-        },
-      },
-      required: ["command"],
-    },
-  },
-  {
-    name: "write_local_file",
-    description:
-      "Writes string content to a file. Relative paths are automatically resolved to /workspace/.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        file_path: {
-          type: Type.STRING,
-          description: "The relative file path (e.g., 'index.js' or 'src/App.js').",
-        },
-        content: {
-          type: Type.STRING,
-          description: "The file content to write.",
-        },
-      },
-      required: ["file_path", "content"],
-    },
-  },
-];
 
 // --- REST API ENDPOINTS ---
 
@@ -631,149 +573,42 @@ app.post("/api/agent/chat", async (req, res) => {
     const {
       message,
       history = [],
-      model = "gemini-3.6-flash",
-      systemInstruction = `You are NanoGemini, an autonomous developer agent running inside a secure, isolated Docker sandbox.
-You have the ability to execute bash terminal commands and write files directly to the file system.
-Your working directory is restricted to \`/workspace/\`. 
-If a user asks you to build an app or run a script, create the files, install dependencies via bash, run commands, and verify it works.
-Always think step-by-step. Use your tools immediately when needed without asking for permission.`,
+      model = DEFAULT_GEMINI_MODEL,
+      temperature = 0,
+      systemInstruction = DEFAULT_SYSTEM_INSTRUCTION,
+      maxTurns,
     } = req.body;
 
     if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY?.trim() || "";
-    const placeholderKeys = new Set(["MY_GEMINI_API_KEY", "your_gemini_api_key_here"]);
-    if (!apiKey || placeholderKeys.has(apiKey)) {
+    if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
       return res.status(503).json({
         error: "GEMINI_API_KEY is not configured on the server.",
       });
     }
 
-    const safeHistory = Array.isArray(history) ? history : [];
-    const ai = getGeminiClient();
-
-    // Prepare contents history
-    // We construct the contents array for generateContent or chat session
-    const contents: any[] = [];
-
-    // Format previous turns
-    for (const item of safeHistory) {
-      if (item && typeof item.role === "string" && typeof item.content === "string") {
-        contents.push({
-          role: item.role === "user" ? "user" : "model",
-          parts: [{ text: item.content }],
-        });
-      }
-    }
-
-    // Add current user prompt
-    contents.push({
-      role: "user",
-      parts: [{ text: message }],
+    const result = await runGeminiAgent({
+      message,
+      history: Array.isArray(history) ? history : [],
+      model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
+      temperature: typeof temperature === "number" ? temperature : 0,
+      systemInstruction:
+        typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION,
+      maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
+      sandboxConfig,
     });
-
-    const executionSteps: Array<{
-      type: "tool_call" | "text_response";
-      toolName?: string;
-      args?: any;
-      output?: string;
-      text?: string;
-    }> = [];
-
-    let currentTurnCount = 0;
-    const maxTurns = 8; // Prevent infinite tool loops
-    let finalText = "";
-
-    let currentContents = [...contents];
-
-    while (currentTurnCount < maxTurns) {
-      currentTurnCount++;
-
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: currentContents,
-        config: {
-          systemInstruction: systemInstruction,
-          temperature: 0,
-          tools: [{ functionDeclarations: agentFunctionDeclarations }],
-        },
-      });
-
-      const candidate = response.candidates?.[0];
-      if (!candidate) {
-        finalText = response.text || "No response candidate generated.";
-        break;
-      }
-
-      const functionCalls = response.functionCalls;
-
-      if (functionCalls && functionCalls.length > 0) {
-        // Model requested one or more tool calls
-        const functionResponsesParts: any[] = [];
-
-        // Append model's candidate content to preserve context
-        if (candidate.content) {
-          currentContents.push(candidate.content);
-        }
-
-        for (const call of functionCalls) {
-          const fnName = call.name;
-          const fnArgs = (call.args && typeof call.args === "object" ? call.args : {}) as Record<string, unknown>;
-
-          let toolResult = "";
-          if (fnName === "execute_system_command") {
-            toolResult =
-              typeof fnArgs.command === "string"
-                ? await executeSystemCommand(fnArgs.command)
-                : "Error: Invalid arguments for execute_system_command (expected string 'command').";
-          } else if (fnName === "write_local_file") {
-            toolResult =
-              typeof fnArgs.file_path === "string" && typeof fnArgs.content === "string"
-                ? await writeLocalFile(fnArgs.file_path, fnArgs.content)
-                : "Error: Invalid arguments for write_local_file (expected string 'file_path' and 'content').";
-          } else {
-            toolResult = `Unknown function: ${fnName}`;
-          }
-
-          executionSteps.push({
-            type: "tool_call",
-            toolName: fnName,
-            args: fnArgs,
-            output: toolResult,
-          });
-
-          functionResponsesParts.push({
-            functionResponse: {
-              name: fnName,
-              response: { result: toolResult },
-            },
-          });
-        }
-
-        // Add function response turn back to contents
-        currentContents.push({
-          role: "user",
-          parts: functionResponsesParts,
-        });
-      } else {
-        // No function calls, model returned final text answer
-        finalText = response.text || "";
-        executionSteps.push({
-          type: "text_response",
-          text: finalText,
-        });
-        break;
-      }
-    }
 
     // Get updated workspace files to send back to UI
     const updatedFiles = await getWorkspaceFilesTree();
 
     res.json({
-      text: finalText,
-      executionSteps,
+      text: result.text,
+      executionSteps: result.executionSteps,
+      events: result.events,
+      turns: result.turns,
+      maxTurnsReached: result.maxTurnsReached,
       files: updatedFiles,
     });
   } catch (error: any) {

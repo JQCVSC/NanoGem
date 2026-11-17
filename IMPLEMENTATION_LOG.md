@@ -17,3 +17,9 @@
   5. Added JSON `404` handler for unmatched `/api/*` routes so authenticated API typos do not fall through to SPA HTML.
   6. Fixed discrepancies between `src/components/CodebaseExport.tsx`, `/api/nanogemini/source`, `.env.example`, and `README.md` (`Node.js 22`, `NANOGEM_SANDBOX_IMAGE`, `NANOGEM_MAX_OUTPUT_BYTES`).
 - Added regression tests in `tests/sandbox.test.ts` and `tests/smoke.test.ts`.
+
+## Stage 2 — Extract Reusable Gemini Agent Service
+- Added `src/agent/agentService.ts` containing `@google/genai` invocation, `DEFAULT_GEMINI_MODEL`, `DEFAULT_SYSTEM_INSTRUCTION`, history conversion, tool-call loop (`execute_system_command`, `write_local_file`), maximum-turn protection (`maxTurns`), and structured lifecycle events (`assistant_text`, `tool_call_requested`, `tool_result`, `command_started`, `command_completed`, `command_failed`, `final_response`, `execution_error`).
+- Added `executeSandboxCommandDetailed` in `src/server/sandboxRuntime.ts` so `agentService.ts` gets deterministic command exit/failure status without changing `executeSandboxCommand`.
+- Refactored `server.ts` `/api/agent/chat` to call `runGeminiAgent` rather than duplicating the Gemini loop, preserving browser API compatibility.
+- Added unit tests in `tests/agentService.test.ts` covering direct response, sandboxed tool calls, tool/API failures, and maximum-turn termination.
