@@ -53,17 +53,17 @@ export const CodebaseExport: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-65px)] bg-slate-950 text-slate-100 font-mono overflow-y-auto">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 font-mono overflow-y-auto">
       <div className="max-w-6xl mx-auto w-full p-6 space-y-6">
         {/* Banner */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
               <Box className="w-5 h-5 text-emerald-400" />
-              <h2 className="text-lg font-bold text-slate-100">NanoGemini Source Codebase</h2>
+              <h2 className="text-lg font-bold text-slate-100">NanoGem Source Codebase</h2>
             </div>
             <p className="text-xs text-slate-400">
-              Inspect, copy, or export the full production-ready code for running NanoGemini on your host machine or cloud infrastructure.
+              Inspect, copy, or export the full production-ready code for running NanoGem on your host machine or cloud infrastructure.
             </p>
           </div>
 
@@ -81,7 +81,7 @@ export const CodebaseExport: React.FC = () => {
         {/* Local Docker Setup Instructions */}
         <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 space-y-2">
           <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-            <Terminal className="w-4 h-4" /> Quickstart: Run NanoGemini Locally with Docker
+            <Terminal className="w-4 h-4" /> Quickstart: Run NanoGem Locally with Docker
           </h3>
           <p className="text-xs text-slate-300">
             Execute these commands in your terminal to launch the isolated Docker container:

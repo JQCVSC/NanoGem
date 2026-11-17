@@ -33,7 +33,7 @@ export const AgentConfigModal: React.FC<AgentConfigModalProps> = ({
     onClose();
   };
 
-  const DEFAULT_SYSTEM_INSTRUCTION = `You are NanoGemini, an autonomous developer agent running inside a secure, isolated Docker sandbox.
+  const DEFAULT_SYSTEM_INSTRUCTION = `You are NanoGem, an autonomous developer agent running inside a secure, isolated container sandbox.
 You have the ability to execute bash terminal commands and write files directly to the file system.
 Your working directory is restricted to \`/workspace/\`. 
 If a user asks you to build an app, create the files, install the dependencies via bash, and verify it works.
@@ -52,7 +52,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
             <Settings className="w-5 h-5 text-emerald-400" />
-            <h2 className="text-sm font-bold text-slate-100">NanoGemini Sandbox Config</h2>
+            <h2 className="text-sm font-bold text-slate-100">NanoGem Sandbox Config</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
             <X className="w-5 h-5" />

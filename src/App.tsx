@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { FolderPlus, MessageSquarePlus, FolderGit2, History } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Header, type AppTab } from "./components/Header";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
@@ -29,6 +29,8 @@ export default function App() {
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [progressEvents, setProgressEvents] = useState<AgentProgressEvent[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [tokenInput, setTokenInput] = useState<string>(() => getStoredApiToken());
@@ -45,9 +47,9 @@ export default function App() {
   const [agentSettings, setAgentSettings] = useState<AgentSettings>({
     model: "gemini-3.6-flash",
     temperature: 0,
-    systemInstruction: `You are NanoGemini, an autonomous developer agent running inside a secure, isolated Docker sandbox.
+    systemInstruction: `You are NanoGem, an autonomous developer agent running inside a secure, isolated container sandbox.
 You have the ability to execute bash terminal commands and write files directly to the file system.
-Your working directory is restricted to \`/workspace/\`. 
+Your working directory is restricted to \`/workspace/\`.
 If a user asks you to build an app, create the files, install the dependencies via bash, and verify it works.
 Always think step-by-step. Use your tools immediately when needed without asking for permission.`,
     sandboxDir: "/workspace",
@@ -264,7 +266,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to communicate with NanoGemini Agent");
+        throw new Error(errData.error || "Failed to communicate with NanoGem Agent");
       }
 
       const contentType = res.headers.get("content-type") || "";
@@ -321,7 +323,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
       const newAgentMsg: ChatMessage = {
         id: agentMsgId,
         role: "assistant",
-        content: data.text || "NanoGemini completed execution.",
+        content: data.text || "NanoGem completed execution.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         executionSteps: data.executionSteps || [],
       };
@@ -338,7 +340,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         {
           id: errorMsgId,
           role: "assistant",
-          content: `⚠️ Error executing agent task: ${err.message}`,
+          content: `Error executing agent task: ${err.message}`,
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         },
       ]);
@@ -347,25 +349,23 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
-  const handleResetWorkspace = async () => {
-    if (
-      window.confirm(
-        "Are you sure you want to reset this project's /workspace/ directory? All created files will be cleared."
-      )
-    ) {
-      try {
-        const res = await apiFetch("/api/workspace/reset", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: activeProjectId }),
-        });
-        const data = await res.json();
-        if (data.files) {
-          setWorkspaceFiles(data.files);
-        }
-      } catch (err) {
-        console.error("Reset failed:", err);
+  const handleConfirmResetWorkspace = async () => {
+    setIsResetting(true);
+    try {
+      const res = await apiFetch("/api/workspace/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: activeProjectId }),
+      });
+      const data = await res.json();
+      if (data.files) {
+        setWorkspaceFiles(data.files);
       }
+      setIsResetModalOpen(false);
+    } catch (err) {
+      console.error("Reset failed:", err);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -414,85 +414,32 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
+  const activeProject = projects.find((p) => p.id === activeProjectId);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans antialiased">
+    <div className="h-screen overflow-hidden bg-[#050811] text-slate-100 flex flex-col font-sans antialiased">
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onResetWorkspace={handleResetWorkspace}
+        onRequestResetWorkspace={() => setIsResetModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         runtimeStatus={runtimeStatus}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={selectProject}
+        onOpenNewProject={() => {
+          setProjectError("");
+          setIsNewProjectModalOpen(true);
+        }}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={(sessionId) => resumeSession(sessionId, activeProjectId)}
+        onStartNewSession={handleStartNewSession}
         isExecuting={isExecuting}
       />
 
-      {/* Project & Session Switcher Bar */}
-      <div className="bg-slate-900/70 border-b border-slate-800 px-4 py-2 text-xs font-mono">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-1.5 text-slate-400">
-              <FolderGit2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Project:</span>
-              <select
-                aria-label="Active Project"
-                value={activeProjectId}
-                onChange={(e) => selectProject(e.target.value)}
-                disabled={isExecuting}
-                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-emerald-500"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                setProjectError("");
-                setIsNewProjectModalOpen(true);
-              }}
-              disabled={isExecuting}
-              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
-            >
-              <FolderPlus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>New Project</span>
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-1.5 text-slate-400">
-              <History className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Session:</span>
-              <select
-                aria-label="Active Session"
-                value={activeSessionId || ""}
-                onChange={(e) => resumeSession(e.target.value, activeProjectId)}
-                disabled={isExecuting || sessions.length === 0}
-                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-emerald-500"
-              >
-                {sessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              onClick={handleStartNewSession}
-              disabled={isExecuting}
-              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
-            >
-              <MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>New Session</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 min-h-0 overflow-hidden">
         {activeTab === "chat" && (
           <AgentChat
             messages={messages}
@@ -501,6 +448,14 @@ Always think step-by-step. Use your tools immediately when needed without asking
             isExecuting={isExecuting}
             progressEvents={progressEvents}
             onSelectTab={(tab) => setActiveTab(tab)}
+            projects={projects}
+            activeProjectId={activeProjectId}
+            onSelectProject={selectProject}
+            onOpenNewProject={() => {
+              setProjectError("");
+              setIsNewProjectModalOpen(true);
+            }}
+            runtimeStatus={runtimeStatus}
           />
         )}
 
@@ -517,18 +472,14 @@ Always think step-by-step. Use your tools immediately when needed without asking
         {activeTab === "context" && (
           <ProjectContextPanel
             projectId={activeProjectId}
-            projectName={
-              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
-            }
+            projectName={activeProject?.name || activeProjectId}
           />
         )}
 
         {activeTab === "git" && (
           <GitReviewPanel
             projectId={activeProjectId}
-            projectName={
-              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
-            }
+            projectName={activeProject?.name || activeProjectId}
             onWorkspaceUpdated={() => loadWorkspaceFiles(activeProjectId)}
           />
         )}
@@ -536,18 +487,14 @@ Always think step-by-step. Use your tools immediately when needed without asking
         {activeTab === "schedules" && (
           <SchedulesPanel
             projectId={activeProjectId}
-            projectName={
-              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
-            }
+            projectName={activeProject?.name || activeProjectId}
           />
         )}
 
         {activeTab === "workflows" && (
           <WorkflowsPanel
             projectId={activeProjectId}
-            projectName={
-              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
-            }
+            projectName={activeProject?.name || activeProjectId}
             files={workspaceFiles}
             isExecuting={isExecuting}
             onWorkflowCompleted={(userPrompt, data) => {
@@ -581,9 +528,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         {activeTab === "setup" && (
           <SetupStatusPanel
             runtimeStatus={runtimeStatus}
-            projectName={
-              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
-            }
+            projectName={activeProject?.name || activeProjectId}
             onRefreshStatus={() => loadRuntimeStatus(activeProjectId)}
             onOpenNewProject={() => {
               setProjectError("");
@@ -607,25 +552,72 @@ Always think step-by-step. Use your tools immediately when needed without asking
         onSaveSettings={(newSettings) => setAgentSettings(newSettings)}
       />
 
+      {/* Reset Sandbox Confirmation Modal */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="reset-sandbox-title"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h2 id="reset-sandbox-title" className="text-sm font-bold text-slate-100">
+                  Reset Sandbox Workspace
+                </h2>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Are you sure you want to reset{" "}
+                  <strong className="text-slate-200">{activeProject?.name || activeProjectId}</strong>
+                  &rsquo;s <code className="font-mono text-slate-200">/workspace/</code> directory?
+                  All created and modified files will be cleared.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsResetModalOpen(false)}
+                disabled={isResetting}
+                className="px-3.5 py-1.5 bg-slate-800 text-slate-200 hover:bg-slate-700 rounded-lg text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResetWorkspace}
+                disabled={isResetting}
+                className="px-4 py-1.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-60 text-slate-950 font-semibold rounded-lg text-xs"
+              >
+                {isResetting ? "Resetting…" : "Reset Sandbox"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isNewProjectModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <form
             onSubmit={handleCreateProject}
             className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
           >
             <h2 className="text-sm font-bold text-slate-100">Create Isolated Project</h2>
-            <div className="space-y-2">
-              <label className="block text-xs text-slate-300">Project Name</label>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-slate-300">Project Name</label>
               <input
                 type="text"
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
                 placeholder="e.g., api-service"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-xs text-slate-300">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-slate-300">
                 Subdirectory inside approved root (optional)
               </label>
               <input
@@ -633,21 +625,21 @@ Always think step-by-step. Use your tools immediately when needed without asking
                 value={newProjectPath}
                 onChange={(e) => setNewProjectPath(e.target.value)}
                 placeholder="e.g., api-service"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
               />
             </div>
             {projectError && <p className="text-xs text-rose-400">{projectError}</p>}
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsNewProjectModalOpen(false)}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+                className="px-3.5 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs"
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-lg text-xs"
               >
                 Create Project
               </button>
@@ -657,33 +649,33 @@ Always think step-by-step. Use your tools immediately when needed without asking
       )}
 
       {isAuthModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <form
             onSubmit={handleSaveApiToken}
             className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl"
           >
             <h2 className="text-sm font-bold text-slate-100">API Authentication Required</h2>
-            <p className="text-xs text-slate-400">
-              Enter your <code className="text-emerald-400">NANOGEM_API_TOKEN</code> to authenticate requests to the NanoGem server.
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Enter your <code className="font-mono text-emerald-400">NANOGEM_API_TOKEN</code> to authenticate requests to the NanoGem server.
             </p>
             <input
               type="password"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
               placeholder="Paste NANOGEM_API_TOKEN..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500"
             />
-            <div className="flex justify-end space-x-2">
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsAuthModalOpen(false)}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+                className="px-3.5 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs"
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-lg text-xs"
               >
                 Save Token
               </button>

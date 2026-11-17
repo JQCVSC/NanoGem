@@ -99,13 +99,13 @@ export const InteractiveTerminal: React.FC<InteractiveTerminalProps> = ({
   ];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-65px)] bg-slate-950 text-slate-100 font-mono">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 font-mono">
       {/* Terminal Top Bar */}
       <div className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center space-x-2">
           <TerminalIcon className="w-4 h-4 text-emerald-400" />
           <span className="text-xs font-bold text-slate-200">
-            NanoGemini Sandbox Shell &mdash; <code className="text-emerald-400">/workspace/</code>
+            NanoGem Sandbox Shell &mdash; <code className="text-emerald-400">/workspace/</code>
           </span>
         </div>
 
@@ -138,7 +138,7 @@ export const InteractiveTerminal: React.FC<InteractiveTerminalProps> = ({
       {/* Terminal Output Log Window */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs leading-relaxed bg-slate-950">
         <div className="text-slate-500 text-[11px] border-b border-slate-800/60 pb-2">
-          Interactive Terminal attached to NanoGemini sandbox environment. All bash commands run inside <code className="text-slate-400">/workspace/</code>.
+          Interactive Terminal attached to NanoGem sandbox environment. All bash commands run inside <code className="text-slate-400">/workspace/</code>.
         </div>
 
         {history.map((item) => (

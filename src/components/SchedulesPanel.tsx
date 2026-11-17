@@ -103,7 +103,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
   };
 
   return (
-    <div className="h-[calc(100vh-110px)] overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">

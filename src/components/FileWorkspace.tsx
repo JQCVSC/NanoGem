@@ -112,7 +112,7 @@ export const FileWorkspace: React.FC<FileWorkspaceProps> = ({
   const isHtml = selectedFilePath?.endsWith(".html");
 
   return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-65px)] bg-slate-950 text-slate-100 font-mono">
+    <div className="flex flex-col md:flex-row h-full bg-slate-950 text-slate-100 font-mono">
       {/* File Tree Left Sidebar */}
       <div className="w-full md:w-64 lg:w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0">
         {/* Tree Header */}

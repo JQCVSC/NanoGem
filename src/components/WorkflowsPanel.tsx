@@ -93,7 +93,7 @@ export const WorkflowsPanel: React.FC<WorkflowsPanelProps> = ({
   };
 
   return (
-    <div className="h-[calc(100vh-110px)] overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         {/* Warning Banner */}
         <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3 text-xs">

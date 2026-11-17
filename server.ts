@@ -1307,8 +1307,11 @@ app.use("/api", (_req, res) => {
 
 // Start Express / Vite Server
 export async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+  let vite: Awaited<ReturnType<typeof createViteServer>> | null = null;
+  const isDev = process.env.NODE_ENV !== "production";
+
+  if (isDev) {
+    vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
@@ -1321,10 +1324,16 @@ export async function startServer() {
     });
   }
 
-  const server = app.listen(securityConfig.port, securityConfig.host, () => {
+  // In development preview mode, bind dual-stack "::" when NANOGEM_HOST is not explicitly pinned
+  // so both IPv4 (127.0.0.1 / 0.0.0.0) and IPv6 (::1) readiness probes succeed while API auth
+  // continues enforcing loopback-only remote addresses unless NANOGEM_API_TOKEN is set.
+  const listenHost =
+    isDev && !process.env.NANOGEM_HOST?.trim() ? "::" : securityConfig.host;
+
+  const server = app.listen(securityConfig.port, listenHost, () => {
     console.log(
-      `[NanoGemini Server] Running on http://${securityConfig.host}:${securityConfig.port} ` +
-        `(execution=${sandboxConfig.executionMode}, auth=${securityConfig.authRequired ? "enabled" : "loopback-only"})`
+      `[NanoGem Server] Running on http://${securityConfig.host}:${securityConfig.port} ` +
+        `(Local: http://localhost:${securityConfig.port}/, execution=${sandboxConfig.executionMode}, auth=${securityConfig.authRequired ? "enabled" : "loopback-only"})`
     );
     if (sandboxConfig.executionMode === "host") {
       console.warn(
@@ -1332,7 +1341,7 @@ export async function startServer() {
       );
     } else {
       console.log(
-        `[NanoGemini Sandbox] runtime=${sandboxConfig.containerRuntime}, image=${sandboxConfig.dockerImage}, user=${sandboxConfig.dockerUser}, ` +
+        `[NanoGem Sandbox] runtime=${sandboxConfig.containerRuntime}, image=${sandboxConfig.dockerImage}, user=${sandboxConfig.dockerUser}, ` +
           `network=${sandboxConfig.dockerNetwork}, cpus=${sandboxConfig.dockerCpus}, ` +
           `memory=${sandboxConfig.dockerMemory}, pids=${sandboxConfig.dockerPidsLimit}`
       );
@@ -1347,6 +1356,9 @@ export async function startServer() {
   const shutdown = () => {
     schedulerService.stop();
     void telegramAdapter.stop().catch(() => {});
+    if (vite) {
+      void vite.close().catch(() => {});
+    }
     server.closeAllConnections?.();
     server.close(() => {
       try {
