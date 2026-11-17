@@ -52,3 +52,12 @@
 - Added `/api/projects/:projectId/git/{status,diff,branch,revert,commit}` routes in `server.ts`.
 - Added `src/components/GitReviewPanel.tsx` and the `"Review Changes"` tab in `src/components/Header.tsx` and `src/App.tsx` with explicit confirmation modals for revert and commit.
 - Added unit tests in `tests/gitReview.test.ts` covering dirty repositories, clean repositories, branch validation, confirmation gates, and non-Git workspaces.
+
+## Stage 7 — Telegram Channel Adapter
+- Installed `grammy` for host-side Telegram long polling (with `webhookCallback` webhook seam).
+- Added Migration 2 (`telegram_chat_mappings`) in `src/storage/database.ts` and `src/storage/telegramMappingStore.ts` so every Telegram chat maps to its own isolated project and session (never implicitly sharing the browser `"default"` workspace).
+- Added `src/channels/telegram/config.ts` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ALLOWED_CHAT_IDS`, `TELEGRAM_REQUIRE_MENTION`, `TELEGRAM_POLLING`), fail-closed allowlist enforcement, and secret token redaction.
+- Added `src/channels/telegram/formatting.ts` (Telegram-safe HTML formatting, code-fence-aware response splitting, and group `@bot` mention extraction).
+- Added `src/channels/telegram/telegramAdapter.ts` supporting `/start`, `/help`, `/new`, `/reset`, `/status`, authorized text prompts, shared `AgentProgressStream` status updates, and shared `runGeminiAgent` execution.
+- Wired Telegram polling lifecycle and sanitized runtime status into `server.ts` and documented Telegram variables in `.env.example`.
+- Added offline tests in `tests/telegram.test.ts` covering authorization, routing/isolation, commands, message splitting, token redaction, and error handling.

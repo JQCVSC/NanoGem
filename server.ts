@@ -44,6 +44,9 @@ import {
 import { openNanoGemDatabase } from "./src/storage/database.ts";
 import { ProjectStore, type ProjectRecord } from "./src/storage/projectStore.ts";
 import { SessionStore, type SessionRecord } from "./src/storage/sessionStore.ts";
+import { TelegramMappingStore } from "./src/storage/telegramMappingStore.ts";
+import { loadTelegramConfig } from "./src/channels/telegram/config.ts";
+import { TelegramChannelAdapter } from "./src/channels/telegram/telegramAdapter.ts";
 
 const app = express();
 
@@ -62,9 +65,18 @@ const DB_PATH = path.resolve(
 
 const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
 const securityConfig = loadServerSecurityConfig();
+const telegramConfig = loadTelegramConfig();
 const db = openNanoGemDatabase(DB_PATH);
 const projectStore = new ProjectStore(db, PROJECTS_ROOT);
 const sessionStore = new SessionStore(db);
+const telegramMappingStore = new TelegramMappingStore(db, projectStore, sessionStore);
+const telegramAdapter = new TelegramChannelAdapter({
+  config: telegramConfig,
+  sandboxConfig,
+  projectStore,
+  sessionStore,
+  mappingStore: telegramMappingStore,
+});
 
 app.use("/api", createApiAuthMiddleware(securityConfig));
 
@@ -326,6 +338,13 @@ app.get("/api/runtime/status", async (req, res) => {
             ...docker,
           }
         : null,
+    telegram: {
+      configured: telegramConfig.enabled,
+      polling: telegramConfig.enabled && telegramConfig.polling,
+      allowedUsersCount: telegramConfig.allowedUserIds.size,
+      allowedChatsCount: telegramConfig.allowedChatIds.size,
+      requireMention: telegramConfig.requireMention,
+    },
   });
 });
 
@@ -1115,7 +1134,12 @@ export async function startServer() {
     }
   });
 
+  if (telegramConfig.enabled && telegramConfig.polling) {
+    void telegramAdapter.startPolling();
+  }
+
   const shutdown = () => {
+    void telegramAdapter.stop().catch(() => {});
     server.closeAllConnections?.();
     server.close(() => {
       try {

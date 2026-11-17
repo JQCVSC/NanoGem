@@ -73,6 +73,23 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "telegram_chat_mappings",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS telegram_chat_mappings (
+          chat_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          active_session_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+          FOREIGN KEY (active_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+      `);
+    },
+  },
 ];
 
 /**
