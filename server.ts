@@ -25,6 +25,13 @@ import {
   type ProgressEvent,
 } from "./src/agent/progressStream.ts";
 import {
+  commitGitChanges,
+  createGitBranch,
+  getGitDiff,
+  getGitStatus,
+  revertGitWorkspace,
+} from "./src/git/gitReviewService.ts";
+import {
   applySecurityHeaders,
   createApiAuthMiddleware,
   loadServerSecurityConfig,
@@ -815,6 +822,91 @@ app.post("/api/projects/:projectId/memory/append", async (req, res) => {
   } catch (error: any) {
     const msg = error?.message || "Failed to append project memory";
     const status = /Security Error|exceed|empty/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+// --- GIT REVIEW & REVERT WORKFLOW ENDPOINTS ---
+
+app.get("/api/projects/:projectId/git/status", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const status = await getGitStatus(project.workspacePath);
+    res.json({ projectId: project.id, ...status });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/projects/:projectId/git/diff", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const diff = await getGitDiff(project.workspacePath);
+    res.json({ projectId: project.id, ...diff });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/projects/:projectId/git/branch", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const { branchName } = req.body || {};
+    if (typeof branchName !== "string" || !branchName.trim()) {
+      return res.status(400).json({ error: "branchName is required" });
+    }
+    const created = await createGitBranch(project.workspacePath, branchName);
+    res.json({ projectId: project.id, ...created });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to create branch";
+    const status = /Invalid|not a Git/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/api/projects/:projectId/git/revert", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const { confirm } = req.body || {};
+    if (confirm !== true) {
+      return res.status(400).json({
+        error: "Explicit confirmation (confirm=true) is required before reverting workspace changes.",
+      });
+    }
+    const result = await revertGitWorkspace(project.workspacePath, { confirm: true });
+    res.json({ projectId: project.id, ...result });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to revert workspace";
+    const status = /confirmation|not a Git/i.test(msg) ? 400 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/api/projects/:projectId/git/commit", async (req, res) => {
+  try {
+    const project = projectStore.getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const { message, confirm } = req.body || {};
+    if (confirm !== true) {
+      return res.status(400).json({
+        error: "Explicit confirmation (confirm=true) is required before committing changes.",
+      });
+    }
+    if (typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({ error: "Commit message is required" });
+    }
+    const result = await commitGitChanges(project.workspacePath, {
+      message,
+      confirm: true,
+    });
+    res.json({ projectId: project.id, ...result });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to commit changes";
+    const status = /confirmation|required|clean|not a Git/i.test(msg) ? 400 : 500;
     res.status(status).json({ error: msg });
   }
 });

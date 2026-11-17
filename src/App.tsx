@@ -4,6 +4,7 @@ import { Header, type AppTab } from "./components/Header";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
 import { ProjectContextPanel } from "./components/ProjectContextPanel";
+import { GitReviewPanel } from "./components/GitReviewPanel";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
@@ -516,6 +517,16 @@ Always think step-by-step. Use your tools immediately when needed without asking
             projectName={
               projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
             }
+          />
+        )}
+
+        {activeTab === "git" && (
+          <GitReviewPanel
+            projectId={activeProjectId}
+            projectName={
+              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
+            }
+            onWorkspaceUpdated={() => loadWorkspaceFiles(activeProjectId)}
           />
         )}
 

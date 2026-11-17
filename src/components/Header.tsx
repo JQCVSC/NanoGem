@@ -11,10 +11,11 @@ import {
   Lock,
   Download,
   BookOpen,
+  FileDiff,
 } from "lucide-react";
 import { RuntimeStatus } from "../types";
 
-export type AppTab = "chat" | "files" | "context" | "terminal" | "export";
+export type AppTab = "chat" | "files" | "context" | "git" | "terminal" | "export";
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -117,7 +118,19 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            Instructions & Memory
+            Instructions &amp; Memory
+          </button>
+
+          <button
+            onClick={() => setActiveTab("git")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === "git"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <FileDiff className="w-4 h-4" />
+            Review Changes
           </button>
 
           <button

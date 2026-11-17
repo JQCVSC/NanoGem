@@ -46,3 +46,9 @@
 - Added `POST /api/agent/chat/stream` SSE endpoint in `server.ts` sharing `executeProjectChatTurn` with `POST /api/agent/chat` (non-streaming clients remain compatible), keeping final assistant response separate from `progress` events and persisting results even if the client disconnects mid-stream.
 - Updated `src/App.tsx`, `src/components/AgentChat.tsx`, and `src/types.ts` to stream and render live progress stages.
 - Added unit tests in `tests/progressStream.test.ts` covering event ordering, secret redaction, and failed commands.
+
+## Stage 6 — Git Review & Revert Workflow
+- Added `src/git/gitReviewService.ts` with isolated repository detection (`--show-toplevel` equality check so nested workspaces never touch parent repos), sanitized git environment (stripping SSH/credential helpers, disabling prompts), branch name validation, status/diff inspection, and confirmation-gated `revertGitWorkspace` and `commitGitChanges` (with no remote push implemented).
+- Added `/api/projects/:projectId/git/{status,diff,branch,revert,commit}` routes in `server.ts`.
+- Added `src/components/GitReviewPanel.tsx` and the `"Review Changes"` tab in `src/components/Header.tsx` and `src/App.tsx` with explicit confirmation modals for revert and commit.
+- Added unit tests in `tests/gitReview.test.ts` covering dirty repositories, clean repositories, branch validation, confirmation gates, and non-Git workspaces.

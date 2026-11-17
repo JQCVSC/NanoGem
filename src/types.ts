@@ -99,3 +99,28 @@ export interface AgentProgressEvent {
   turn: number;
   timestamp: string;
 }
+
+export interface GitFileEntry {
+  path: string;
+  indexStatus: string;
+  workTreeStatus: string;
+  label: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+}
+
+export interface GitStatusInfo {
+  isGitRepo: boolean;
+  branch: string | null;
+  headCommit: string | null;
+  clean: boolean;
+  hasUncommittedChanges: boolean;
+  entries: GitFileEntry[];
+  message?: string;
+}
+
+export interface GitDiffInfo {
+  isGitRepo: boolean;
+  diff: string;
+  untrackedFiles: string[];
+  truncated: boolean;
+  message?: string;
+}
