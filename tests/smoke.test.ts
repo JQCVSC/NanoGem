@@ -43,6 +43,7 @@ test("built server enforces auth and docker default, and supports explicit host 
       HOST: "127.0.0.1",
       PORT: "3199",
       NANOGEM_API_TOKEN: token,
+      GEMINI_API_KEY: "MY_GEMINI_API_KEY",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -94,6 +95,50 @@ test("built server enforces auth and docker default, and supports explicit host 
     if (!statusData.docker.available) {
       assert.match(termData.output, /Sandbox Error:/);
     }
+
+    // Regression checks from Prompt 1 security & correctness audit
+    const traversalPost = await fetch("http://127.0.0.1:3199/api/workspace/file", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ path: "../outside.txt", content: "nope" }),
+    });
+    assert.equal(traversalPost.status, 403);
+
+    const invalidContentPost = await fetch("http://127.0.0.1:3199/api/workspace/file", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ path: "ok.txt", content: { invalid: true } }),
+    });
+    assert.equal(invalidContentPost.status, 400);
+
+    const missingGet = await fetch("http://127.0.0.1:3199/api/workspace/file?path=does-not-exist.txt", {
+      headers: authHeaders,
+    });
+    assert.equal(missingGet.status, 404);
+
+    const invalidTerm = await fetch("http://127.0.0.1:3199/api/workspace/terminal", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ command: "   " }),
+    });
+    assert.equal(invalidTerm.status, 400);
+
+    const placeholderChat = await fetch("http://127.0.0.1:3199/api/agent/chat", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ message: "hello" }),
+    });
+    assert.equal(placeholderChat.status, 503);
+
+    const unauthUnknownApi = await fetch("http://127.0.0.1:3199/api/nonexistent");
+    assert.equal(unauthUnknownApi.status, 401);
+
+    const authUnknownApi = await fetch("http://127.0.0.1:3199/api/nonexistent", {
+      headers: authHeaders,
+    });
+    assert.equal(authUnknownApi.status, 404);
+    const unknownApiBody = await authUnknownApi.json();
+    assert.equal(unknownApiBody.error, "API route not found");
   } finally {
     srvDocker.kill("SIGTERM");
   }

@@ -89,6 +89,37 @@ test("resolveSafeWorkspacePath blocks traversal and sibling prefix escapes", asy
   }
 });
 
+test("resolveSafeWorkspacePath blocks direct, intermediate, and dangling symlink escapes", async (t) => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-symlink-test-"));
+  const wsDir = path.join(tmpRoot, "sandbox_workspace");
+  const outsideDir = path.join(tmpRoot, "outside");
+  await fs.mkdir(wsDir, { recursive: true });
+  await fs.mkdir(outsideDir, { recursive: true });
+  await fs.writeFile(path.join(outsideDir, "secret.txt"), "top-secret");
+
+  try {
+    try {
+      await fs.symlink(path.join(outsideDir, "secret.txt"), path.join(wsDir, "leak.txt"));
+      await fs.symlink(outsideDir, path.join(wsDir, "escape_dir"));
+      await fs.symlink(path.join(outsideDir, "missing_dir"), path.join(wsDir, "dangling_dir"));
+    } catch (err: any) {
+      if (err?.code === "EPERM") {
+        t.skip("Symlink creation requires elevated privileges on this host");
+        return;
+      }
+      throw err;
+    }
+
+    assert.equal(await resolveSafeWorkspacePath(wsDir, "leak.txt"), null);
+    assert.equal(await resolveSafeWorkspacePath(wsDir, "escape_dir/secret.txt"), null);
+    assert.equal(await resolveSafeWorkspacePath(wsDir, "escape_dir/new.txt"), null);
+    assert.equal(await resolveSafeWorkspacePath(wsDir, "dangling_dir"), null);
+    assert.equal(await resolveSafeWorkspacePath(wsDir, "dangling_dir/nested/file.txt"), null);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadServerSecurityConfig blocks unauthenticated public binds", () => {
   const localCfg = loadServerSecurityConfig({});
   assert.equal(localCfg.host, "127.0.0.1");
@@ -168,19 +199,26 @@ test("executeSandboxCommand in docker mode fails closed when configured image or
 test("executeSandboxCommand in explicit host mode strips secrets", async () => {
   const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-host-exec-"));
   const prevKey = process.env.GEMINI_API_KEY;
+  const prevToken = process.env.NANOGEM_API_TOKEN;
   process.env.GEMINI_API_KEY = "super-secret-gemini-key";
+  process.env.NANOGEM_API_TOKEN = "super-secret-api-token";
   try {
     const cfg = loadSandboxConfig(tmpWs, { NANOGEM_EXECUTION_MODE: "host" });
     const output = await executeSandboxCommand(
-      'node -e "console.log(process.env.GEMINI_API_KEY || \'STRIPPED\')"',
+      'node -e "console.log((process.env.GEMINI_API_KEY || \'STRIPPED\') + \':\' + (process.env.NANOGEM_API_TOKEN || \'STRIPPED\'))"',
       cfg
     );
-    assert.equal(output.trim(), "STRIPPED");
+    assert.equal(output.trim(), "STRIPPED:STRIPPED");
   } finally {
     if (prevKey === undefined) {
       delete process.env.GEMINI_API_KEY;
     } else {
       process.env.GEMINI_API_KEY = prevKey;
+    }
+    if (prevToken === undefined) {
+      delete process.env.NANOGEM_API_TOKEN;
+    } else {
+      process.env.NANOGEM_API_TOKEN = prevToken;
     }
     await fs.rm(tmpWs, { recursive: true, force: true });
   }

@@ -227,7 +227,9 @@ async function getWorkspaceFilesTree(dir = WORKSPACE_DIR, relative = ""): Promis
   const results = [];
 
   for (const entry of entries) {
-    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    if (entry.name === "node_modules" || entry.name.startsWith(".") || entry.isSymbolicLink()) {
+      continue;
+    }
     const fullPath = path.join(dir, entry.name);
     const relPath = relative ? `${relative}/${entry.name}` : entry.name;
 
@@ -239,8 +241,8 @@ async function getWorkspaceFilesTree(dir = WORKSPACE_DIR, relative = ""): Promis
         isDirectory: true,
         children,
       });
-    } else {
-      const stats = await fs.stat(fullPath);
+    } else if (entry.isFile()) {
+      const stats = await fs.lstat(fullPath);
       results.push({
         name: entry.name,
         path: relPath,
@@ -369,7 +371,7 @@ USER sandbox
 
 CMD ["/bin/bash"]`,
     requirements: `google-genai>=0.1.1\npython-dotenv>=1.0.0`,
-    envExample: `GEMINI_API_KEY=your_gemini_api_key_here\nHOST=127.0.0.1\nNANOGEM_EXECUTION_MODE=docker\nNANOGEM_DOCKER_NETWORK=none`,
+    envExample: `GEMINI_API_KEY=your_gemini_api_key_here\nHOST=127.0.0.1\nNANOGEM_EXECUTION_MODE=docker\nNANOGEM_SANDBOX_IMAGE=nanogem-sandbox:latest\nNANOGEM_DOCKER_NETWORK=none\nNANOGEM_DOCKER_READ_ONLY=true`,
     agentPy: `import os
 import subprocess
 from google import genai
@@ -547,6 +549,12 @@ app.get("/api/workspace/file", async (req, res) => {
     const content = await fs.readFile(safePath, "utf-8");
     res.json({ path: filePath, content });
   } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return res.status(404).json({ error: "File not found" });
+    }
+    if (error?.code === "EISDIR") {
+      return res.status(400).json({ error: "Path is a directory" });
+    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -557,6 +565,14 @@ app.post("/api/workspace/file", async (req, res) => {
     const { path: filePath, content } = req.body;
     if (!filePath || typeof filePath !== "string") {
       return res.status(400).json({ error: "Missing file path" });
+    }
+    if (content !== undefined && typeof content !== "string") {
+      return res.status(400).json({ error: "File content must be a string" });
+    }
+
+    const safePath = await resolveSafePath(filePath);
+    if (!safePath) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const result = await writeLocalFile(filePath, content ?? "");
@@ -586,7 +602,9 @@ app.delete("/api/workspace/file", async (req, res) => {
 app.post("/api/workspace/terminal", async (req, res) => {
   try {
     const { command } = req.body;
-    if (!command) return res.status(400).json({ error: "Missing command" });
+    if (typeof command !== "string" || !command.trim()) {
+      return res.status(400).json({ error: "Missing or invalid command" });
+    }
 
     const output = await executeSystemCommand(command);
     res.json({ output });
@@ -625,7 +643,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
       return res.status(400).json({ error: "Message is required" });
     }
 
-    if (!process.env.GEMINI_API_KEY?.trim()) {
+    const apiKey = process.env.GEMINI_API_KEY?.trim() || "";
+    const placeholderKeys = new Set(["MY_GEMINI_API_KEY", "your_gemini_api_key_here"]);
+    if (!apiKey || placeholderKeys.has(apiKey)) {
       return res.status(503).json({
         error: "GEMINI_API_KEY is not configured on the server.",
       });
@@ -700,13 +720,19 @@ Always think step-by-step. Use your tools immediately when needed without asking
 
         for (const call of functionCalls) {
           const fnName = call.name;
-          const fnArgs = call.args as any;
+          const fnArgs = (call.args && typeof call.args === "object" ? call.args : {}) as Record<string, unknown>;
 
           let toolResult = "";
           if (fnName === "execute_system_command") {
-            toolResult = await executeSystemCommand(fnArgs.command);
+            toolResult =
+              typeof fnArgs.command === "string"
+                ? await executeSystemCommand(fnArgs.command)
+                : "Error: Invalid arguments for execute_system_command (expected string 'command').";
           } else if (fnName === "write_local_file") {
-            toolResult = await writeLocalFile(fnArgs.file_path, fnArgs.content);
+            toolResult =
+              typeof fnArgs.file_path === "string" && typeof fnArgs.content === "string"
+                ? await writeLocalFile(fnArgs.file_path, fnArgs.content)
+                : "Error: Invalid arguments for write_local_file (expected string 'file_path' and 'content').";
           } else {
             toolResult = `Unknown function: ${fnName}`;
           }
@@ -756,6 +782,11 @@ Always think step-by-step. Use your tools immediately when needed without asking
       error: error.message || "Internal server error during agent execution.",
     });
   }
+});
+
+// Return JSON 404 for unknown /api/* routes instead of falling through to SPA HTML.
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "API route not found" });
 });
 
 // Start Express / Vite Server

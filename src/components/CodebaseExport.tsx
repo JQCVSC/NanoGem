@@ -45,7 +45,7 @@ export const CodebaseExport: React.FC = () => {
 
   const FILE_TITLES: Record<keyof NanoGeminiSource, { name: string; desc: string }> = {
     agentPy: { name: "agent.py", desc: "The core Gemini Agent brain & function calling execution loop" },
-    dockerfile: { name: "Dockerfile", desc: "Docker sandbox environment configuration (Python 3.11 + Node.js 20)" },
+    dockerfile: { name: "Dockerfile", desc: "Docker sandbox environment configuration (Node.js 22 + Python 3 + Git)" },
     requirements: { name: "requirements.txt", desc: "Python SDK dependencies (google-genai, python-dotenv)" },
     envExample: { name: ".env.example", desc: "Environment secrets template" },
     startSandboxSh: { name: "start_sandbox.sh", desc: "Local shell launcher script" },

@@ -244,48 +244,35 @@ export async function resolveSafeWorkspacePath(
     return null;
   }
 
-  // Walk up to the nearest existing ancestor and verify its realpath stays inside workspaceReal.
-  let probe = resolved;
-  while (!existsSync(probe)) {
-    const parent = path.dirname(probe);
-    if (parent === probe) {
-      return null;
-    }
-    probe = parent;
-  }
-
-  try {
-    const ancestorReal = await fs.realpath(probe);
-    if (!isInsideDirectory(workspaceReal, ancestorReal)) {
-      return null;
-    }
-
-    // If the target itself exists (including as a symlink), verify its realpath as well.
+  // Walk every existing prefix segment from workspaceReal down to resolved so
+  // intermediate symlinks (including dangling ones) cannot escape workspaceReal.
+  const relSegments = path.relative(workspaceReal, resolved).split(path.sep).filter(Boolean);
+  let currentPrefix = workspaceReal;
+  for (const segment of relSegments) {
+    currentPrefix = path.join(currentPrefix, segment);
     try {
-      const stat = await fs.lstat(resolved);
-      if (stat.isSymbolicLink()) {
-        const targetReal = await fs.realpath(resolved);
-        if (!isInsideDirectory(workspaceReal, targetReal)) {
+      const segStat = await fs.lstat(currentPrefix);
+      if (segStat.isSymbolicLink()) {
+        const segReal = await fs.realpath(currentPrefix);
+        if (!isInsideDirectory(workspaceReal, segReal)) {
           return null;
         }
       }
     } catch (err: any) {
       if (err?.code === "ENOENT") {
-        // Dangling symlink at target path: block to avoid symlink-planting attacks.
+        // Check if currentPrefix itself is a dangling symlink (lstat succeeds, realpath throws ENOENT).
         try {
-          const linkStat = await fs.lstat(resolved);
+          const linkStat = await fs.lstat(currentPrefix);
           if (linkStat.isSymbolicLink()) {
             return null;
           }
         } catch {
-          // Path genuinely does not exist yet (safe for file creation).
+          // Segment genuinely does not exist yet (safe for new file creation).
         }
-      } else {
-        return null;
+        break;
       }
+      return null;
     }
-  } catch {
-    return null;
   }
 
   return resolved;

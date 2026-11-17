@@ -133,6 +133,7 @@ By default, NanoGem binds only to loopback (`http://127.0.0.1:3000`).
 | `NANOGEM_DOCKER_PIDS_LIMIT` | `64` | Maximum processes/threads (`--pids-limit`) |
 | `NANOGEM_DOCKER_READ_ONLY` | `true` | Mount rootfs read-only with bounded `tmpfs` |
 | `NANOGEM_COMMAND_TIMEOUT_MS` | `30000` | Per-command timeout in milliseconds |
+| `NANOGEM_MAX_OUTPUT_BYTES` | `1048576` | Max stdout/stderr buffer per command (1 MiB) |
 
 ---
 
