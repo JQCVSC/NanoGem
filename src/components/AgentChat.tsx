@@ -36,6 +36,8 @@ interface AgentChatProps {
   onSelectProject: (projectId: string) => void;
   onOpenNewProject: () => void;
   runtimeStatus: RuntimeStatus | null;
+  draftPrompt?: string | null;
+  onConsumeDraftPrompt?: () => void;
 }
 
 const SAMPLE_PROMPTS = [
@@ -83,6 +85,8 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   onSelectProject,
   onOpenNewProject,
   runtimeStatus,
+  draftPrompt = null,
+  onConsumeDraftPrompt,
 }) => {
   const [input, setInput] = useState("");
   const [savedMsgIds, setSavedMsgIds] = useState<Record<string, boolean>>({});
@@ -93,7 +97,15 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (draftPrompt) {
+      setInput(draftPrompt);
+      textareaRef.current?.focus();
+      onConsumeDraftPrompt?.();
+    }
+  }, [draftPrompt, onConsumeDraftPrompt]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [messages, isExecuting]);
 
   const runtimeInfo = runtimeStatus?.containerRuntime ?? runtimeStatus?.docker;

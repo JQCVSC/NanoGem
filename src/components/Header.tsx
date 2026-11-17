@@ -23,10 +23,12 @@ import {
   X,
   ArrowUpRight,
   Check,
+  Home,
 } from "lucide-react";
 import { ProjectSummary, RuntimeStatus, SessionSummary } from "../types";
 
 export type AppTab =
+  | "home"
   | "chat"
   | "files"
   | "context"
@@ -56,6 +58,7 @@ interface HeaderProps {
 }
 
 const PRIMARY_TABS: Array<{ id: AppTab; label: string; icon: React.FC<{ className?: string }> }> = [
+  { id: "home", label: "Home", icon: Home },
   { id: "chat", label: "Agent", icon: MessageSquareCode },
   { id: "files", label: "Files", icon: FolderTree },
   { id: "context", label: "Memory", icon: BookOpen },
@@ -137,30 +140,36 @@ export const Header: React.FC<HeaderProps> = ({
   const isMoreActive = MORE_TABS.some((t) => t.id === activeTab);
   const activeMoreItem = MORE_TABS.find((t) => t.id === activeTab);
 
-  let statusLabel = "Podman Sandboxed";
+  let statusLabel = "Checking Runtime…";
   let statusClasses =
-    "bg-[#0b2420] text-emerald-400 border-emerald-500/30 hover:border-emerald-500/60";
+    "bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500";
   let StatusIcon = ShieldCheck;
 
-  if (isHostMode) {
-    statusLabel = "Host Mode (Unsafe)";
-    statusClasses =
-      "bg-amber-950/40 text-amber-300 border-amber-500/30 hover:border-amber-400/60";
-    StatusIcon = ShieldAlert;
-  } else if (runtimeStatus && !dockerReady) {
-    statusLabel = runtimeInfo?.available ? "Image Missing" : "Runtime Not Ready";
-    statusClasses =
-      "bg-rose-950/40 text-rose-300 border-rose-500/30 hover:border-rose-400/60";
-    StatusIcon = ShieldAlert;
-  } else if (selectedRuntime === "docker") {
-    statusLabel = "Docker Sandboxed";
+  if (runtimeStatus) {
+    if (isHostMode) {
+      statusLabel = "Host Mode (Unsafe)";
+      statusClasses =
+        "bg-amber-950/40 text-amber-300 border-amber-500/30 hover:border-amber-400/60";
+      StatusIcon = ShieldAlert;
+    } else if (!dockerReady) {
+      statusLabel = runtimeInfo?.available ? "Image Missing" : "Runtime Not Ready";
+      statusClasses =
+        "bg-rose-950/40 text-rose-300 border-rose-500/30 hover:border-rose-400/60";
+      StatusIcon = ShieldAlert;
+    } else {
+      statusLabel = selectedRuntime === "docker" ? "Docker Sandboxed" : "Podman Sandboxed";
+      statusClasses =
+        "bg-[#0b2420] text-emerald-400 border-emerald-500/30 hover:border-emerald-500/60";
+    }
   }
 
-  const runtimeDisplay = isHostMode
-    ? "Host (Direct)"
-    : `${selectedRuntime === "docker" ? "Docker" : "Podman"}${
-        runtimeInfo?.serverVersion ? ` v${runtimeInfo.serverVersion}` : ""
-      }`;
+  const runtimeDisplay = !runtimeStatus
+    ? "Checking…"
+    : isHostMode
+      ? "Host (Direct)"
+      : `${selectedRuntime === "docker" ? "Docker" : selectedRuntime === "podman" ? "Podman" : "Unavailable"}${
+          runtimeInfo?.serverVersion ? ` v${runtimeInfo.serverVersion}` : ""
+        }`;
 
   const selectTab = (tab: AppTab) => {
     setActiveTab(tab);
@@ -178,8 +187,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Logo */}
           <button
             type="button"
-            onClick={() => selectTab("chat")}
-            className="flex items-center gap-2.5 whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg"
+            onClick={() => selectTab("home")}
+            aria-label="NanoGem Home"
+            title="Go to Home Dashboard"
+            className="flex items-center gap-2.5 whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded-lg cursor-pointer"
           >
             <div
               aria-label="NanoGem Logo"
@@ -422,7 +433,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center Navigation Tabs: Agent, Files, Memory, Review, More */}
+        {/* Center Navigation Tabs: Home, Agent, Files, Memory, Review, More */}
         <nav
           aria-label="Workspace Views"
           className="hidden md:flex items-center bg-[#070b14] p-1 rounded-lg border border-[#141d30] gap-1 shrink-0"
@@ -434,6 +445,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 key={tab.id}
                 type="button"
+                aria-current={isActive ? "page" : undefined}
                 onClick={() => selectTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                   isActive
@@ -568,6 +580,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 key={item.id}
                 type="button"
+                aria-current={isActive ? "page" : undefined}
                 onClick={() => selectTab(item.id)}
                 className={`px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 text-left transition-colors ${
                   isActive

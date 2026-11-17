@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Header, type AppTab } from "./components/Header";
+import { HomeDashboard } from "./components/HomeDashboard";
 import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
 import { ProjectContextPanel } from "./components/ProjectContextPanel";
@@ -22,23 +23,47 @@ import {
 } from "./types";
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<AppTab>("chat");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export const INITIAL_APP_TAB: AppTab = "home";
+
+export interface AppProps {
+  initialTab?: AppTab;
+  initialMessages?: ChatMessage[];
+  initialRuntimeStatus?: RuntimeStatus | null;
+  initialProjects?: ProjectSummary[];
+  initialProjectId?: string;
+  initialSessions?: SessionSummary[];
+  initialActiveSessionId?: string | null;
+  skipInitialFetch?: boolean;
+}
+
+export default function App({
+  initialTab = INITIAL_APP_TAB,
+  initialMessages = [],
+  initialRuntimeStatus = null,
+  initialProjects = [],
+  initialProjectId = "default",
+  initialSessions = [],
+  initialActiveSessionId = null,
+  skipInitialFetch = false,
+}: AppProps = {}) {
+  const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const [draftPrompt, setDraftPrompt] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [progressEvents, setProgressEvents] = useState<AgentProgressEvent[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(initialRuntimeStatus);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [tokenInput, setTokenInput] = useState<string>(() => getStoredApiToken());
 
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string>("default");
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>(initialProjects);
+  const [activeProjectId, setActiveProjectId] = useState<string>(initialProjectId);
+  const [sessions, setSessions] = useState<SessionSummary[]>(initialSessions);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(initialActiveSessionId);
+  const initialProjectIdRef = useRef<string>(initialProjectId);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState<boolean>(false);
   const [newProjectName, setNewProjectName] = useState<string>("");
   const [newProjectPath, setNewProjectPath] = useState<string>("");
@@ -92,49 +117,6 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   }, []);
 
-  const selectProject = useCallback(
-    async (projectId: string) => {
-      try {
-        const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/select`, {
-          method: "POST",
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        setActiveProjectId(projectId);
-        setWorkspaceFiles(data.files || []);
-        const projectSessions: SessionSummary[] = data.sessions || [];
-        setSessions(projectSessions);
-        const targetSession = projectSessions[0] || data.defaultSession;
-        if (targetSession) {
-          await resumeSession(targetSession.id, projectId);
-        } else {
-          setActiveSessionId(null);
-          setMessages([]);
-        }
-      } catch (err) {
-        console.error("Failed to select project:", err);
-      }
-    },
-    [resumeSession]
-  );
-
-  const loadProjects = useCallback(async () => {
-    try {
-      const res = await apiFetch("/api/projects");
-      if (res.ok) {
-        const data = await res.json();
-        const list: ProjectSummary[] = data.projects || [];
-        setProjects(list);
-        const targetId = list.some((p) => p.id === activeProjectId)
-          ? activeProjectId
-          : list[0]?.id || "default";
-        await selectProject(targetId);
-      }
-    } catch (err) {
-      console.error("Failed to load projects:", err);
-    }
-  }, [activeProjectId, selectProject]);
-
   const loadRuntimeStatus = useCallback(async (projectId: string = activeProjectId) => {
     try {
       const healthRes = await fetch("/api/health");
@@ -154,14 +136,60 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   }, [activeProjectId]);
 
+  const selectProject = useCallback(
+    async (projectId: string) => {
+      try {
+        const res = await apiFetch(`/api/projects/${encodeURIComponent(projectId)}/select`, {
+          method: "POST",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setActiveProjectId(projectId);
+        setWorkspaceFiles(data.files || []);
+        const projectSessions: SessionSummary[] = data.sessions || [];
+        setSessions(projectSessions);
+        const targetSession = projectSessions[0] || data.defaultSession;
+        if (targetSession) {
+          await resumeSession(targetSession.id, projectId);
+        } else {
+          setActiveSessionId(null);
+          setMessages([]);
+        }
+        void loadRuntimeStatus(projectId);
+      } catch (err) {
+        console.error("Failed to select project:", err);
+      }
+    },
+    [resumeSession, loadRuntimeStatus]
+  );
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/projects");
+      if (res.ok) {
+        const data = await res.json();
+        const list: ProjectSummary[] = data.projects || [];
+        setProjects(list);
+        const preferred = initialProjectIdRef.current;
+        const targetId = list.some((p) => p.id === preferred)
+          ? preferred
+          : list[0]?.id || "default";
+        await selectProject(targetId);
+      }
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  }, [selectProject]);
+
   useEffect(() => {
+    if (skipInitialFetch) return;
     const unsubscribe = onUnauthorized(() => {
       setIsAuthModalOpen(true);
     });
-    loadRuntimeStatus();
-    loadProjects();
+    void loadRuntimeStatus(initialProjectIdRef.current);
+    void loadProjects();
     return unsubscribe;
-  }, [loadRuntimeStatus, loadProjects]);
+  }, [skipInitialFetch, loadRuntimeStatus, loadProjects]);
 
   const handleSaveApiToken = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -415,6 +443,16 @@ Always think step-by-step. Use your tools immediately when needed without asking
   };
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  const handleTryStarterPrompt = useCallback((prompt: string) => {
+    setDraftPrompt(prompt);
+    setActiveTab("chat");
+  }, []);
+
+  const handleConsumeDraftPrompt = useCallback(() => {
+    setDraftPrompt(null);
+  }, []);
 
   return (
     <div className="h-screen overflow-hidden bg-[#050811] text-slate-100 flex flex-col font-sans antialiased">
@@ -440,6 +478,19 @@ Always think step-by-step. Use your tools immediately when needed without asking
       />
 
       <main className="flex-1 min-h-0 overflow-hidden">
+        {activeTab === "home" && (
+          <HomeDashboard
+            runtimeStatus={runtimeStatus}
+            activeProject={activeProject}
+            activeProjectId={activeProjectId}
+            activeSession={activeSession}
+            activeSessionId={activeSessionId}
+            messageCount={messages.length}
+            onSelectTab={(tab) => setActiveTab(tab)}
+            onTryPrompt={handleTryStarterPrompt}
+          />
+        )}
+
         {activeTab === "chat" && (
           <AgentChat
             messages={messages}
@@ -456,6 +507,8 @@ Always think step-by-step. Use your tools immediately when needed without asking
               setIsNewProjectModalOpen(true);
             }}
             runtimeStatus={runtimeStatus}
+            draftPrompt={draftPrompt}
+            onConsumeDraftPrompt={handleConsumeDraftPrompt}
           />
         )}
 
