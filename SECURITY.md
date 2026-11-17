@@ -39,13 +39,23 @@ Every command executed via `POST /api/workspace/terminal` or the Gemini `execute
 
 7. **Secret Isolation**
    - Host environment variables—including `GEMINI_API_KEY` and `NANOGEM_API_TOKEN`—are never passed into the sandbox container.
+   - The root `Dockerfile` contains no host secrets and excludes `.env*` files via `.dockerignore`.
 
 ---
 
-## Host Execution Opt-In (`NANOGEM_EXECUTION_MODE=host`)
+## Prebuilt Sandbox Image Distribution (CI & GHCR)
+
+- `.github/workflows/docker-sandbox.yml` builds the canonical root `Dockerfile` (`SANDBOX_UID=1000`, `SANDBOX_GID=1000`), runs a hardened container smoke test, uploads `nanogem-sandbox-latest.tar.gz` as a workflow artifact, and publishes `ghcr.io/jqcvsc/nanogem-sandbox` on pushes to `main` (never from pull requests).
+- **Prefer immutable tags (`sha-<full-commit-sha>`)** over `latest` when configuring `NANOGEM_SANDBOX_IMAGE` for repeatable or production deployments; `latest` is convenient for local development.
+- **Runtime requirement:** Pulling a GHCR image or loading a CI artifact removes the need to build the image locally, but **Docker or Podman is still required at runtime**. NanoGem fails closed if the container runtime or configured image is unavailable.
+- **Never expose the Docker socket:** Never mount `/var/run/docker.sock` (or equivalent Podman socket) into the agent sandbox container, as socket access allows escaping the container and gaining host-root-equivalent control.
+
+---
+
+## Host Execution Opt-In (`NANOGEM_EXECUTION_MODE=host`, Local Development Only)
 
 - NanoGem **never** falls back to host execution automatically if Docker is missing or misconfigured.
-- Direct host execution is available **only** when `NANOGEM_EXECUTION_MODE=host` is explicitly set.
+- Direct host execution is available **only** when `NANOGEM_EXECUTION_MODE=host` is explicitly set for trusted local development.
 - Even in `host` mode, host secrets such as `GEMINI_API_KEY` and `NANOGEM_API_TOKEN` are omitted from the child process environment, and `cwd` is set to `sandbox_workspace`.
 - **Warning:** In `host` mode, commands run with the privileges of the Node.js server process and full host filesystem/network access. Never use `host` mode with untrusted prompts or on a shared/public server.
 

@@ -109,14 +109,17 @@ export function loadSandboxConfig(
     );
   }
 
+  const hasSandboxImage = env.NANOGEM_SANDBOX_IMAGE !== undefined && env.NANOGEM_SANDBOX_IMAGE.trim() !== "";
+  const dockerImage = validateSimpleToken(
+    hasSandboxImage ? env.NANOGEM_SANDBOX_IMAGE : env.NANOGEM_DOCKER_IMAGE,
+    DEFAULT_DOCKER_IMAGE,
+    hasSandboxImage ? "NANOGEM_SANDBOX_IMAGE" : "NANOGEM_DOCKER_IMAGE"
+  );
+
   return {
     executionMode: rawMode,
     workspaceDir: path.resolve(workspaceDir),
-    dockerImage: validateSimpleToken(
-      env.NANOGEM_DOCKER_IMAGE,
-      DEFAULT_DOCKER_IMAGE,
-      "NANOGEM_DOCKER_IMAGE"
-    ),
+    dockerImage,
     dockerUser: validateDockerUser(env.NANOGEM_DOCKER_USER),
     dockerNetwork: validateSimpleToken(
       env.NANOGEM_DOCKER_NETWORK,
@@ -384,7 +387,7 @@ async function executeInDocker(command: string, config: SandboxConfig): Promise<
       const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
       const hint =
         /Unable to find image|No such image/i.test(stderr)
-          ? `\nHint: Build the sandbox image first with ./scripts/build-sandbox.sh (expected image: ${config.dockerImage}).`
+          ? `\nHint: Pull or build the sandbox image first (expected image: ${config.dockerImage}; e.g. 'docker pull ${config.dockerImage}' or './scripts/build-sandbox.sh').`
           : /Cannot connect to the Docker daemon|is the docker daemon running/i.test(stderr)
             ? "\nHint: Ensure the Docker daemon is running."
             : "";
@@ -496,6 +499,6 @@ export async function checkDockerAvailability(config: SandboxConfig): Promise<Do
     serverVersion: info.stdout || undefined,
     error: image.ok
       ? undefined
-      : `Sandbox image '${config.dockerImage}' not found. Run ./scripts/build-sandbox.sh.`,
+      : `Sandbox image '${config.dockerImage}' not found. Pull it or run ./scripts/build-sandbox.sh.`,
   };
 }

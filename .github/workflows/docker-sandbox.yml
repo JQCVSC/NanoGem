@@ -1,0 +1,193 @@
+name: Build Sandbox Docker Image
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      push_to_ghcr:
+        description: "Push image to GitHub Container Registry (ghcr.io)"
+        type: boolean
+        default: true
+      upload_artifact:
+        description: "Upload compressed image archive (.tar.gz) as a workflow artifact"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-sandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build sandbox image for verification
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: nanogem-sandbox:latest
+          build-args: |
+            SANDBOX_UID=1000
+            SANDBOX_GID=1000
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test hardened sandbox container
+        run: |
+          TMP_WS="$(mktemp -d)"
+          trap 'rm -rf "$TMP_WS"' EXIT
+          chmod 777 "$TMP_WS"
+
+          docker run --rm --init \
+            --workdir /workspace \
+            --mount "type=bind,source=${TMP_WS},target=/workspace" \
+            --user 1000:1000 \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges:true \
+            --network none \
+            --cpus 1.0 \
+            --memory 512m \
+            --memory-swap 512m \
+            --pids-limit 64 \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777 \
+            --tmpfs /home/sandbox:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \
+            -e HOME=/home/sandbox \
+            -e PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            -e LANG=C.UTF-8 \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PIP_NO_CACHE_DIR=1 \
+            -e NPM_CONFIG_CACHE=/home/sandbox/.npm \
+            nanogem-sandbox:latest \
+            /bin/bash -ec '
+              # 1. Non-root UID/GID verification
+              test "$(id -u)" = "1000"
+              test "$(id -g)" = "1000"
+              test "$(id -un)" = "sandbox"
+
+              # 2. Required toolchain verification
+              node --version
+              python3 --version
+              python --version
+              git --version
+
+              # 3. /workspace bind-mount write access
+              echo "ok" > /workspace/ci-smoke.txt
+              test "$(cat /workspace/ci-smoke.txt)" = "ok"
+
+              # 4. Read-only root filesystem & writable tmpfs verification
+              if touch /etc/ro-check 2>/dev/null; then
+                echo "Expected read-only rootfs failure" >&2
+                exit 1
+              fi
+              echo "tmp-ok" > /tmp/ci-tmp.txt
+              echo "home-ok" > /home/sandbox/ci-home.txt
+              rm -f /tmp/ci-tmp.txt /home/sandbox/ci-home.txt
+
+              # 5. Dropped capabilities and no-new-privileges verification
+              grep -Eq "^CapEff:\s*0000000000000000$" /proc/self/status
+              grep -Eq "^CapPrm:\s*0000000000000000$" /proc/self/status
+              grep -Eq "^NoNewPrivs:\s*1$" /proc/self/status
+
+              # 6. Network isolation verification (--network none)
+              node -e "
+                const os = require(\"os\");
+                const net = require(\"net\");
+                const ifaces = Object.keys(os.networkInterfaces());
+                if (ifaces.some((name) => name !== \"lo\")) {
+                  throw new Error(\"Unexpected network interfaces: \" + ifaces.join(\",\"));
+                }
+                const sock = net.createConnection({ host: \"1.1.1.1\", port: 80, timeout: 1500 });
+                sock.on(\"connect\", () => {
+                  sock.destroy();
+                  process.exit(1);
+                });
+                sock.on(\"error\", () => process.exit(0));
+                sock.on(\"timeout\", () => {
+                  sock.destroy();
+                  process.exit(0);
+                });
+              "
+            '
+
+      - name: Export compressed image archive
+        if: github.event_name != 'workflow_dispatch' || inputs.upload_artifact
+        run: |
+          mkdir -p dist-image
+          docker save nanogem-sandbox:latest | gzip > dist-image/nanogem-sandbox-latest.tar.gz
+          ls -lh dist-image/nanogem-sandbox-latest.tar.gz
+
+      - name: Upload image artifact
+        if: github.event_name != 'workflow_dispatch' || inputs.upload_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nanogem-sandbox-image
+          path: dist-image/nanogem-sandbox-latest.tar.gz
+          retention-days: 14
+
+  publish-ghcr:
+    needs: build-and-smoke-test
+    if: github.event_name != 'pull_request' && (github.event_name == 'push' || inputs.push_to_ghcr)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve lowercase GHCR image repository
+        id: repo
+        run: |
+          OWNER_LOWER="$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image_repo=${OWNER_LOWER}/nanogem-sandbox" >> "$GITHUB_OUTPUT"
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.repo.outputs.image_repo }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=long
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GitHub Container Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SANDBOX_UID=1000
+            SANDBOX_GID=1000
+          cache-from: type=gha

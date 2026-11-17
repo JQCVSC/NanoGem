@@ -337,7 +337,8 @@ app.get("/api/nanogemini/source", (req, res) => {
 ARG SANDBOX_UID=1000
 ARG SANDBOX_GID=1000
 
-RUN test "\${SANDBOX_UID}" != "0" && test "\${SANDBOX_GID}" != "0" \\
+RUN printf '%s' "\${SANDBOX_UID}" | grep -Eq '^[1-9][0-9]*$' \\
+  && printf '%s' "\${SANDBOX_GID}" | grep -Eq '^[1-9][0-9]*$' \\
   && apt-get update \\
   && apt-get install -y --no-install-recommends \\
     bash \\

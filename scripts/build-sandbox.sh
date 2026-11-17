@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-IMAGE_NAME="${NANOGEM_DOCKER_IMAGE:-nanogem-sandbox:latest}"
+IMAGE_NAME="${NANOGEM_SANDBOX_IMAGE:-${NANOGEM_DOCKER_IMAGE:-nanogem-sandbox:latest}}"
 
 HOST_UID=1000
 HOST_GID=1000
@@ -22,8 +22,8 @@ fi
 SANDBOX_UID="${NANOGEM_SANDBOX_UID:-${HOST_UID}}"
 SANDBOX_GID="${NANOGEM_SANDBOX_GID:-${HOST_GID}}"
 
-if [ "${SANDBOX_UID}" = "0" ] || [ "${SANDBOX_GID}" = "0" ]; then
-  echo "Error: Sandbox UID/GID must be non-root (got ${SANDBOX_UID}:${SANDBOX_GID})." >&2
+if ! printf '%s' "${SANDBOX_UID}" | grep -Eq '^[1-9][0-9]*$' || ! printf '%s' "${SANDBOX_GID}" | grep -Eq '^[1-9][0-9]*$'; then
+  echo "Error: Sandbox UID/GID must be positive non-root integers (got ${SANDBOX_UID}:${SANDBOX_GID})." >&2
   exit 1
 fi
 

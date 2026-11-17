@@ -7,4 +7,6 @@ coverage
 .env.*
 !.env.example
 sandbox_workspace
+dist-image
+*.tar.gz
 *.log

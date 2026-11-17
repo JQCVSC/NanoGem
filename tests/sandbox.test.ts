@@ -116,6 +116,55 @@ test("loadServerSecurityConfig blocks unauthenticated public binds", () => {
   assert.equal(constantTimeTokenEqual(publicCfg.apiToken, "wrong-token"), false);
 });
 
+test("loadSandboxConfig accepts NANOGEM_SANDBOX_IMAGE, falls back to NANOGEM_DOCKER_IMAGE, and rejects invalid tokens", () => {
+  const prebuilt = loadSandboxConfig("/tmp/ws", {
+    NANOGEM_SANDBOX_IMAGE: "ghcr.io/jqcvsc/nanogem-sandbox:sha-0123456789abcdef0123456789abcdef01234567",
+  });
+  assert.equal(
+    prebuilt.dockerImage,
+    "ghcr.io/jqcvsc/nanogem-sandbox:sha-0123456789abcdef0123456789abcdef01234567"
+  );
+
+  const preferred = loadSandboxConfig("/tmp/ws", {
+    NANOGEM_SANDBOX_IMAGE: "ghcr.io/jqcvsc/nanogem-sandbox:latest",
+    NANOGEM_DOCKER_IMAGE: "legacy-alias:latest",
+  });
+  assert.equal(preferred.dockerImage, "ghcr.io/jqcvsc/nanogem-sandbox:latest");
+
+  const legacyAlias = loadSandboxConfig("/tmp/ws", {
+    NANOGEM_DOCKER_IMAGE: "custom-local:v1",
+  });
+  assert.equal(legacyAlias.dockerImage, "custom-local:v1");
+
+  assert.throws(
+    () => loadSandboxConfig("/tmp/ws", { NANOGEM_SANDBOX_IMAGE: "bad image" }),
+    /Invalid NANOGEM_SANDBOX_IMAGE/
+  );
+  assert.throws(
+    () => loadSandboxConfig("/tmp/ws", { NANOGEM_SANDBOX_IMAGE: "bad\0image" }),
+    /Invalid NANOGEM_SANDBOX_IMAGE/
+  );
+});
+
+test("executeSandboxCommand in docker mode fails closed when configured image or daemon is unavailable", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-docker-failclosed-"));
+  try {
+    const cfg = loadSandboxConfig(tmpWs, {
+      NANOGEM_EXECUTION_MODE: "docker",
+      NANOGEM_SANDBOX_IMAGE: "ghcr.io/jqcvsc/nanogem-sandbox:sha-nonexistent",
+    });
+    const marker = path.join(tmpWs, "host-fallback-should-not-run.txt");
+    const output = await executeSandboxCommand(
+      `node -e "require('fs').writeFileSync('host-fallback-should-not-run.txt','pwned')"`,
+      cfg
+    );
+    assert.match(output, /Sandbox Error:|Error executing command/);
+    await assert.rejects(fs.access(marker));
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
 test("executeSandboxCommand in explicit host mode strips secrets", async () => {
   const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-host-exec-"));
   const prevKey = process.env.GEMINI_API_KEY;
