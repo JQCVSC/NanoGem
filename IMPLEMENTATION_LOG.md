@@ -61,3 +61,10 @@
 - Added `src/channels/telegram/telegramAdapter.ts` supporting `/start`, `/help`, `/new`, `/reset`, `/status`, authorized text prompts, shared `AgentProgressStream` status updates, and shared `runGeminiAgent` execution.
 - Wired Telegram polling lifecycle and sanitized runtime status into `server.ts` and documented Telegram variables in `.env.example`.
 - Added offline tests in `tests/telegram.test.ts` covering authorization, routing/isolation, commands, message splitting, token redaction, and error handling.
+
+## Stage 8 — Opt-In Scheduled Project Tasks
+- Added Migration 3 (`scheduled_tasks`, `scheduled_task_runs`) in `src/storage/database.ts` and `src/storage/scheduleStore.ts`.
+- Added `src/scheduler/scheduleParser.ts` validating interval (`30s`–`30d`) and 5-field cron expressions and computing next UTC execution times.
+- Added `src/scheduler/schedulerService.ts` disabled by default (`NANOGEM_SCHEDULES_ENABLED=false`), bound to approved projects, executing via `runGeminiAgent` + `AgentProgressStream` + `projectStore.buildSandboxConfigForProject`, enforcing per-project & global concurrency guards, recovering interrupted runs on startup, and sending optional authenticated Telegram notifications.
+- Added `/api/schedules*` endpoints in `server.ts`, `src/components/SchedulesPanel.tsx` UI tab, and `NANOGEM_SCHEDULES_ENABLED` in `.env.example`.
+- Added tests in `tests/scheduler.test.ts` covering schedule parsing, pause/resume/delete, concurrency limits, failure persistence, Telegram notification auth, and restart recovery.

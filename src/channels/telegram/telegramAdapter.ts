@@ -390,4 +390,13 @@ export class TelegramChannelAdapter {
     const bot = this.createBotInstance();
     return webhookCallback(bot, "express");
   }
+
+  async sendNotification(chatId: string, text: string): Promise<void> {
+    if (!this.config.enabled) return;
+    const bot = this.createBotInstance();
+    const safeText = redactTelegramSecrets(text, this.config.botToken);
+    for (const chunk of splitTelegramMessage(safeText, 3800)) {
+      await bot.api.sendMessage(chatId, chunk);
+    }
+  }
 }

@@ -90,6 +90,53 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: "scheduled_tasks",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          task_kind TEXT NOT NULL CHECK(task_kind IN ('test_run', 'repo_status', 'dependency_report')),
+          schedule_expr TEXT NOT NULL,
+          prompt_override TEXT,
+          enabled INTEGER NOT NULL DEFAULT 0,
+          notify_telegram_chat_id TEXT,
+          last_status TEXT NOT NULL DEFAULT 'idle',
+          last_run_at TEXT,
+          next_run_at TEXT,
+          last_error TEXT,
+          last_output TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_project
+          ON scheduled_tasks(project_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          session_id TEXT,
+          status TEXT NOT NULL CHECK(status IN ('running', 'succeeded', 'failed', 'cancelled')),
+          output TEXT,
+          error TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_scheduled_runs_task
+          ON scheduled_task_runs(task_id, started_at DESC);
+      `);
+    },
+  },
 ];
 
 /**

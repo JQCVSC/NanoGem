@@ -45,8 +45,13 @@ import { openNanoGemDatabase } from "./src/storage/database.ts";
 import { ProjectStore, type ProjectRecord } from "./src/storage/projectStore.ts";
 import { SessionStore, type SessionRecord } from "./src/storage/sessionStore.ts";
 import { TelegramMappingStore } from "./src/storage/telegramMappingStore.ts";
+import { ScheduleStore } from "./src/storage/scheduleStore.ts";
 import { loadTelegramConfig } from "./src/channels/telegram/config.ts";
 import { TelegramChannelAdapter } from "./src/channels/telegram/telegramAdapter.ts";
+import {
+  SchedulerService,
+  isSchedulingEnabledByEnv,
+} from "./src/scheduler/schedulerService.ts";
 
 const app = express();
 
@@ -70,12 +75,23 @@ const db = openNanoGemDatabase(DB_PATH);
 const projectStore = new ProjectStore(db, PROJECTS_ROOT);
 const sessionStore = new SessionStore(db);
 const telegramMappingStore = new TelegramMappingStore(db, projectStore, sessionStore);
+const scheduleStore = new ScheduleStore(db);
 const telegramAdapter = new TelegramChannelAdapter({
   config: telegramConfig,
   sandboxConfig,
   projectStore,
   sessionStore,
   mappingStore: telegramMappingStore,
+});
+const schedulerService = new SchedulerService({
+  enabledByEnv: isSchedulingEnabledByEnv(),
+  sandboxConfig,
+  projectStore,
+  sessionStore,
+  scheduleStore,
+  mappingStore: telegramMappingStore,
+  telegramConfig,
+  sendTelegramMessage: (chatId, text) => telegramAdapter.sendNotification(chatId, text),
 });
 
 app.use("/api", createApiAuthMiddleware(securityConfig));
@@ -930,6 +946,92 @@ app.post("/api/projects/:projectId/git/commit", async (req, res) => {
   }
 });
 
+// --- OPT-IN SCHEDULED TASKS ENDPOINTS ---
+
+app.get("/api/schedules", (req, res) => {
+  const projectId =
+    typeof req.query.projectId === "string" && req.query.projectId.trim()
+      ? req.query.projectId.trim()
+      : undefined;
+  if (projectId && !projectStore.getProjectById(projectId)) {
+    return res.status(404).json({ error: "Project not found" });
+  }
+  res.json({
+    enabledByEnv: schedulerService.enabledByEnv,
+    schedules: scheduleStore.listTasks(projectId),
+    runs: scheduleStore.listRuns(projectId),
+  });
+});
+
+app.post("/api/schedules", (req, res) => {
+  try {
+    const {
+      projectId = "default",
+      name,
+      taskKind,
+      scheduleExpr,
+      promptOverride,
+      enabled = false,
+      notifyTelegramChatId,
+    } = req.body || {};
+
+    if (typeof projectId !== "string" || !projectStore.getProjectById(projectId)) {
+      return res.status(404).json({ error: "Approved project not found" });
+    }
+
+    schedulerService.validateTelegramNotificationTarget(notifyTelegramChatId);
+
+    const task = scheduleStore.createTask({
+      projectId,
+      name,
+      taskKind,
+      scheduleExpr,
+      promptOverride: typeof promptOverride === "string" ? promptOverride : undefined,
+      enabled: Boolean(enabled),
+      notifyTelegramChatId:
+        typeof notifyTelegramChatId === "string" ? notifyTelegramChatId : undefined,
+    });
+    res.status(201).json({ task });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to create schedule";
+    const status = /Invalid|required|Unsupported|Security Error|between|require/i.test(msg)
+      ? 400
+      : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.post("/api/schedules/:taskId/pause", (req, res) => {
+  const task = scheduleStore.pauseTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: "Scheduled task not found" });
+  res.json({ task });
+});
+
+app.post("/api/schedules/:taskId/resume", (req, res) => {
+  const task = scheduleStore.resumeTask(req.params.taskId);
+  if (!task) return res.status(404).json({ error: "Scheduled task not found" });
+  res.json({ task });
+});
+
+app.post("/api/schedules/:taskId/run-now", async (req, res) => {
+  try {
+    const existing = scheduleStore.getTaskById(req.params.taskId);
+    if (!existing) return res.status(404).json({ error: "Scheduled task not found" });
+    const run = await schedulerService.runTask(existing.id);
+    res.json({ run, task: scheduleStore.getTaskById(existing.id) });
+  } catch (error: any) {
+    const msg = error?.message || "Failed to execute scheduled task";
+    const status = /Concurrency Guard/i.test(msg) ? 409 : 500;
+    res.status(status).json({ error: msg });
+  }
+});
+
+app.delete("/api/schedules/:taskId", (req, res) => {
+  const deleted = scheduleStore.deleteTask(req.params.taskId);
+  if (!deleted) return res.status(404).json({ error: "Scheduled task not found" });
+  res.json({ deleted: true });
+});
+
 async function executeProjectChatTurn(
   body: Record<string, unknown>,
   onProgress?: (event: ProgressEvent) => void | Promise<void>
@@ -1137,8 +1239,10 @@ export async function startServer() {
   if (telegramConfig.enabled && telegramConfig.polling) {
     void telegramAdapter.startPolling();
   }
+  schedulerService.start();
 
   const shutdown = () => {
+    schedulerService.stop();
     void telegramAdapter.stop().catch(() => {});
     server.closeAllConnections?.();
     server.close(() => {

@@ -124,3 +124,33 @@ export interface GitDiffInfo {
   truncated: boolean;
   message?: string;
 }
+
+export interface ScheduledTaskInfo {
+  id: string;
+  projectId: string;
+  name: string;
+  taskKind: "test_run" | "repo_status" | "dependency_report";
+  scheduleExpr: string;
+  promptOverride: string | null;
+  enabled: boolean;
+  notifyTelegramChatId: string | null;
+  lastStatus: "idle" | "running" | "succeeded" | "failed" | "paused";
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  lastError: string | null;
+  lastOutput: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledTaskRunInfo {
+  id: string;
+  taskId: string;
+  projectId: string;
+  sessionId: string | null;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  output: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}

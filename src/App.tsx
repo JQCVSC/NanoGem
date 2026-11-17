@@ -5,6 +5,7 @@ import { AgentChat } from "./components/AgentChat";
 import { FileWorkspace } from "./components/FileWorkspace";
 import { ProjectContextPanel } from "./components/ProjectContextPanel";
 import { GitReviewPanel } from "./components/GitReviewPanel";
+import { SchedulesPanel } from "./components/SchedulesPanel";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
@@ -527,6 +528,15 @@ Always think step-by-step. Use your tools immediately when needed without asking
               projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
             }
             onWorkspaceUpdated={() => loadWorkspaceFiles(activeProjectId)}
+          />
+        )}
+
+        {activeTab === "schedules" && (
+          <SchedulesPanel
+            projectId={activeProjectId}
+            projectName={
+              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
+            }
           />
         )}
 
