@@ -7,6 +7,7 @@ import { ProjectContextPanel } from "./components/ProjectContextPanel";
 import { GitReviewPanel } from "./components/GitReviewPanel";
 import { SchedulesPanel } from "./components/SchedulesPanel";
 import { WorkflowsPanel } from "./components/WorkflowsPanel";
+import { SetupStatusPanel } from "./components/SetupStatusPanel";
 import { InteractiveTerminal } from "./components/InteractiveTerminal";
 import { CodebaseExport } from "./components/CodebaseExport";
 import { AgentConfigModal } from "./components/AgentConfigModal";
@@ -132,7 +133,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   }, [activeProjectId, selectProject]);
 
-  const loadRuntimeStatus = useCallback(async () => {
+  const loadRuntimeStatus = useCallback(async (projectId: string = activeProjectId) => {
     try {
       const healthRes = await fetch("/api/health");
       if (healthRes.ok) {
@@ -141,7 +142,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
           setIsAuthModalOpen(true);
         }
       }
-      const res = await apiFetch("/api/runtime/status");
+      const res = await apiFetch(`/api/runtime/status?projectId=${encodeURIComponent(projectId)}`);
       if (res.ok) {
         const data: RuntimeStatus = await res.json();
         setRuntimeStatus(data);
@@ -149,7 +150,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
     } catch (err) {
       console.error("Failed to load runtime status:", err);
     }
-  }, []);
+  }, [activeProjectId]);
 
   useEffect(() => {
     const unsubscribe = onUnauthorized(() => {
@@ -574,6 +575,21 @@ Always think step-by-step. Use your tools immediately when needed without asking
               if (data.sessionId) setActiveSessionId(data.sessionId);
               setActiveTab("chat");
             }}
+          />
+        )}
+
+        {activeTab === "setup" && (
+          <SetupStatusPanel
+            runtimeStatus={runtimeStatus}
+            projectName={
+              projects.find((p) => p.id === activeProjectId)?.name || activeProjectId
+            }
+            onRefreshStatus={() => loadRuntimeStatus(activeProjectId)}
+            onOpenNewProject={() => {
+              setProjectError("");
+              setIsNewProjectModalOpen(true);
+            }}
+            onSelectTab={(tab) => setActiveTab(tab)}
           />
         )}
 

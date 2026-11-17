@@ -47,10 +47,17 @@ export interface AgentSettings {
 export interface RuntimeStatus {
   executionMode: "docker" | "host";
   authRequired: boolean;
+  isPublicBind?: boolean;
+  provider?: {
+    id: string;
+    displayName: string;
+    apiKeyConfigured: boolean;
+  };
   docker: {
     image: string;
     user: string;
     network: string;
+    networkEnabled?: boolean;
     cpus: string;
     memory: string;
     pidsLimit: number;
@@ -60,6 +67,24 @@ export interface RuntimeStatus {
     serverVersion?: string;
     error?: string;
   } | null;
+  telegram?: {
+    configured: boolean;
+    polling: boolean;
+    allowedUsersCount: number;
+    allowedChatsCount: number;
+    requireMention: boolean;
+  };
+  schedules?: {
+    enabledByEnv: boolean;
+  };
+  projectContext?: {
+    projectId: string;
+    hasGeminiMd: boolean;
+    hasMemoryMd: boolean;
+    isGitRepo: boolean;
+    hasUncommittedChanges: boolean;
+    branch: string | null;
+  };
 }
 
 export interface ProjectSummary {

@@ -14,6 +14,7 @@ import {
   FileDiff,
   Clock,
   FileSpreadsheet,
+  Activity,
 } from "lucide-react";
 import { RuntimeStatus } from "../types";
 
@@ -24,6 +25,7 @@ export type AppTab =
   | "git"
   | "schedules"
   | "workflows"
+  | "setup"
   | "terminal"
   | "export";
 
@@ -48,6 +50,12 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const isHostMode = runtimeStatus?.executionMode === "host";
   const dockerReady = Boolean(runtimeStatus?.docker?.available && runtimeStatus?.docker?.imagePresent);
+  const networkEnabled = Boolean(runtimeStatus?.docker?.networkEnabled);
+  const missingContext =
+    runtimeStatus?.projectContext &&
+    !runtimeStatus.projectContext.hasGeminiMd &&
+    !runtimeStatus.projectContext.hasMemoryMd;
+  const uncommittedChanges = Boolean(runtimeStatus?.projectContext?.hasUncommittedChanges);
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-slate-100 px-4 py-3 sticky top-0 z-30 shadow-md">
@@ -58,43 +66,78 @@ export const Header: React.FC<HeaderProps> = ({
             <Box className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <h1 className="font-mono text-lg font-bold tracking-tight text-slate-100">
                 Nano<span className="text-emerald-400">Gemini</span>
               </h1>
               {isHostMode ? (
-                <span
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("setup")}
                   title="NANOGEM_EXECUTION_MODE=host is active (no Docker isolation)"
                   className="px-2 py-0.5 text-xs font-mono bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full flex items-center gap-1"
                 >
                   <ShieldAlert className="w-3 h-3" /> Host Mode (Unsafe)
-                </span>
+                </button>
               ) : runtimeStatus && !dockerReady ? (
-                <span
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("setup")}
                   title={runtimeStatus.docker?.error || "Docker daemon or sandbox image unavailable"}
                   className="px-2 py-0.5 text-xs font-mono bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-full flex items-center gap-1"
                 >
                   <ShieldAlert className="w-3 h-3" /> Docker Not Ready
-                </span>
+                </button>
               ) : (
-                <span className="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("setup")}
+                  className="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1"
+                >
                   <ShieldCheck className="w-3 h-3" /> Docker Sandboxed
-                </span>
+                </button>
+              )}
+              {networkEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("setup")}
+                  className="px-2 py-0.5 text-[11px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-full"
+                >
+                  Network Enabled
+                </button>
+              )}
+              {missingContext && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("context")}
+                  className="px-2 py-0.5 text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700 rounded-full"
+                >
+                  No GEMINI.md/MEMORY.md
+                </button>
+              )}
+              {uncommittedChanges && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("git")}
+                  className="px-2 py-0.5 text-[11px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-full"
+                >
+                  Uncommitted Changes
+                </button>
               )}
             </div>
             <p className="text-xs text-slate-400 font-mono">
               Workspace: <code className="text-slate-300">/workspace/</code> | Agent Status:{" "}
               {isExecuting ? (
-                <span className="text-amber-400 font-semibold animate-pulse">Running tools...</span>
+                <span className="text-amber-400 font-semibold animate-pulse">Running task...</span>
               ) : (
-                <span className="text-emerald-400 font-semibold">Idle & Ready</span>
+                <span className="text-emerald-400 font-semibold">Idle &amp; Ready</span>
               )}
             </p>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-mono">
+        <nav className="flex items-center overflow-x-auto bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-mono">
           <button
             onClick={() => setActiveTab("chat")}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
@@ -165,6 +208,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <FileSpreadsheet className="w-4 h-4" />
             Workflows
+          </button>
+
+          <button
+            onClick={() => setActiveTab("setup")}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === "setup"
+                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-900"
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            Setup &amp; Status
           </button>
 
           <button

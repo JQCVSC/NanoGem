@@ -79,3 +79,9 @@
 - Added `/api/workflows/templates` and `/api/projects/:projectId/workflows/run` in `server.ts`.
 - Added `src/components/WorkflowsPanel.tsx` and the `"Workflows"` tab in `src/components/Header.tsx` and `src/App.tsx`.
 - Added unit tests in `tests/workflows.test.ts` covering templates, confirmation gate, allowed/rejected file types, sensitive files, path traversal, and size limits.
+
+## Stage 11 — Product Polish & Onboarding
+- Expanded `/api/runtime/status` in `server.ts` and `src/types.ts` to expose non-secret readiness telemetry (`provider.apiKeyConfigured`, `docker.networkEnabled`, `telegram`, `schedules.enabledByEnv`, and `projectContext` for `GEMINI.md`, `MEMORY.md`, and uncommitted Git changes).
+- Added `src/components/SetupStatusPanel.tsx` (`Setup & Status` tab) covering Docker/runtime readiness with recovery commands, hidden Gemini API key setup instructions, host/network safety status, project creation/import shortcut, Telegram setup guide, and links to `SECURITY.md` and `README.md`.
+- Updated `src/components/Header.tsx` and `src/App.tsx` to display clear status pills when Docker is unavailable, host mode is active, container network is enabled, project instructions/memory are missing, a task is running, or Git changes are uncommitted.
+- Expanded `tests/smoke.test.ts` to verify runtime status telemetry and non-disclosure of credentials.

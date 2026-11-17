@@ -103,14 +103,20 @@ test("built server enforces auth and docker default, and supports explicit host 
     assert.ok(Array.isArray(filesData.files));
     assert.ok(filesData.files.some((f: any) => f.name === "README.md"));
 
-    const statusRes = await fetch("http://127.0.0.1:3199/api/runtime/status", {
+    const statusRes = await fetch("http://127.0.0.1:3199/api/runtime/status?projectId=default", {
       headers: authHeaders,
     });
     assert.equal(statusRes.status, 200);
     const statusData = await statusRes.json();
     assert.equal(statusData.executionMode, "docker");
     assert.equal(statusData.docker.network, "none");
+    assert.equal(statusData.docker.networkEnabled, false);
     assert.equal(statusData.docker.user, "1000:1000");
+    assert.equal(statusData.provider.id, "gemini");
+    assert.equal(statusData.provider.apiKeyConfigured, false);
+    assert.equal(statusData.schedules.enabledByEnv, false);
+    assert.equal(statusData.projectContext.projectId, "default");
+    assert.equal(JSON.stringify(statusData).includes("MY_GEMINI_API_KEY"), false);
 
     const termRes = await fetch("http://127.0.0.1:3199/api/workspace/terminal", {
       method: "POST",

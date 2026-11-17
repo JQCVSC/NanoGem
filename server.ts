@@ -338,22 +338,50 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Runtime sandbox posture & Docker status
+// Runtime sandbox posture, provider readiness, Telegram, and active project status
 app.get("/api/runtime/status", async (req, res) => {
   const docker =
     sandboxConfig.executionMode === "docker"
       ? await checkDockerAvailability(sandboxConfig)
       : null;
 
+  const projectId =
+    typeof req.query.projectId === "string" && req.query.projectId.trim()
+      ? req.query.projectId.trim()
+      : "default";
+  const project = projectStore.getProjectById(projectId);
+  let projectContext: Record<string, unknown> | undefined;
+  if (project) {
+    const [ctxFiles, gitStatus] = await Promise.all([
+      loadProjectInstructionsAndMemory(project.workspacePath),
+      getGitStatus(project.workspacePath),
+    ]);
+    projectContext = {
+      projectId: project.id,
+      hasGeminiMd: ctxFiles.hasGeminiMd,
+      hasMemoryMd: ctxFiles.hasMemoryMd,
+      isGitRepo: gitStatus.isGitRepo,
+      hasUncommittedChanges: gitStatus.hasUncommittedChanges,
+      branch: gitStatus.branch,
+    };
+  }
+
   res.json({
     executionMode: sandboxConfig.executionMode,
     authRequired: securityConfig.authRequired,
+    isPublicBind: securityConfig.isPublicBind,
+    provider: {
+      id: agentProvider.id,
+      displayName: agentProvider.displayName,
+      apiKeyConfigured: agentProvider.isConfigured(),
+    },
     docker:
       sandboxConfig.executionMode === "docker"
         ? {
             image: sandboxConfig.dockerImage,
             user: sandboxConfig.dockerUser,
             network: sandboxConfig.dockerNetwork,
+            networkEnabled: sandboxConfig.dockerNetwork.toLowerCase() !== "none",
             cpus: sandboxConfig.dockerCpus,
             memory: sandboxConfig.dockerMemory,
             pidsLimit: sandboxConfig.dockerPidsLimit,
@@ -368,6 +396,10 @@ app.get("/api/runtime/status", async (req, res) => {
       allowedChatsCount: telegramConfig.allowedChatIds.size,
       requireMention: telegramConfig.requireMention,
     },
+    schedules: {
+      enabledByEnv: schedulerService.enabledByEnv,
+    },
+    projectContext,
   });
 });
 
