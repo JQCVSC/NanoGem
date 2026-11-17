@@ -8,7 +8,7 @@ NanoGem is a Gemini-native local coding agent that executes AI-generated and use
 
 ## Sandbox Isolation Controls (Default `docker` Mode)
 
-Every command executed via `/api/workspace/terminal`, the browser agent chat, Telegram, or scheduled tasks runs inside an ephemeral container (`docker run --rm --init`) enforced by `src/server/sandboxRuntime.ts`:
+Every command executed via `/api/workspace/terminal`, the browser agent chat, Telegram, or scheduled tasks runs inside an ephemeral container (`<docker|podman> run --rm --init`) enforced by `src/server/sandboxRuntime.ts`. `NANOGEM_EXECUTION_MODE=docker` always requires a container runtime (`NANOGEM_CONTAINER_RUNTIME=auto|docker|podman`) and **never** falls back to host execution:
 
 1. **Minimal Workspace Mount Only**
    - Only the active project's workspace directory is bind-mounted at `/workspace`.

@@ -109,6 +109,9 @@ test("built server enforces auth and docker default, and supports explicit host 
     assert.equal(statusRes.status, 200);
     const statusData = await statusRes.json();
     assert.equal(statusData.executionMode, "docker");
+    assert.equal(statusData.containerRuntime.configuredRuntime, "auto");
+    assert.equal(statusData.containerRuntime.network, "none");
+    assert.equal(statusData.containerRuntime.networkEnabled, false);
     assert.equal(statusData.docker.network, "none");
     assert.equal(statusData.docker.networkEnabled, false);
     assert.equal(statusData.docker.user, "1000:1000");

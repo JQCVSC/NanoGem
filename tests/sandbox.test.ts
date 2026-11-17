@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  buildContainerRunArgs,
   buildDockerRunArgs,
+  checkContainerRuntimeAvailability,
   executeSandboxCommand,
+  executeSandboxCommandDetailed,
   loadSandboxConfig,
+  resolveContainerRuntime,
   resolveSafeWorkspacePath,
+  type ContainerRuntimeExecutable,
+  type RuntimeProbeFn,
 } from "../src/server/sandboxRuntime.ts";
 import {
   constantTimeTokenEqual,
@@ -220,6 +227,163 @@ test("executeSandboxCommand in explicit host mode strips secrets", async () => {
     } else {
       process.env.NANOGEM_API_TOKEN = prevToken;
     }
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+function createMockProbe(available: Set<ContainerRuntimeExecutable>, imagePresent = true): RuntimeProbeFn {
+  return async (runtime, args) => {
+    if (!available.has(runtime)) {
+      return { ok: false, stdout: "", stderr: `${runtime} not installed` };
+    }
+    if (args[0] === "info") {
+      return { ok: true, stdout: runtime === "docker" ? "27.0.0" : "5.2.0", stderr: "" };
+    }
+    if (args[0] === "image" && args[1] === "inspect") {
+      return imagePresent
+        ? { ok: true, stdout: "sha256:abc", stderr: "" }
+        : { ok: false, stdout: "", stderr: "No such image" };
+    }
+    return { ok: true, stdout: "", stderr: "" };
+  };
+}
+
+function createCapturingSpawn(captured: Array<{ cmd: string; args: string[] }>) {
+  return ((cmd: string, args: string[]) => {
+    captured.push({ cmd, args: [...args] });
+    const child = new EventEmitter() as any;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => true;
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.from(`ran-with:${cmd}`));
+      child.emit("close", 0);
+    });
+    return child;
+  }) as any;
+}
+
+test("NANOGEM_CONTAINER_RUNTIME rejects invalid values and defaults to auto", () => {
+  const def = loadSandboxConfig("/tmp/ws", {});
+  assert.equal(def.containerRuntime, "auto");
+  assert.throws(
+    () => loadSandboxConfig("/tmp/ws", { NANOGEM_CONTAINER_RUNTIME: "host" }),
+    /Invalid NANOGEM_CONTAINER_RUNTIME/
+  );
+});
+
+test("Runtime selection: 1. Docker selected, 2. Podman selected, 3. Auto->Docker, 4. Auto->Podman", async () => {
+  const bothProbe = createMockProbe(new Set(["docker", "podman"]));
+  const podmanOnlyProbe = createMockProbe(new Set(["podman"]));
+  const dockerOnlyProbe = createMockProbe(new Set(["docker"]));
+
+  // 1. Explicit docker selected
+  const dockerCfg = loadSandboxConfig("/tmp/ws", { NANOGEM_CONTAINER_RUNTIME: "docker" });
+  const r1 = await resolveContainerRuntime(dockerCfg, bothProbe);
+  assert.equal(r1.selectedRuntime, "docker");
+
+  // 2. Explicit podman selected (even when docker is available)
+  const podmanCfg = loadSandboxConfig("/tmp/ws", { NANOGEM_CONTAINER_RUNTIME: "podman" });
+  const r2 = await resolveContainerRuntime(podmanCfg, bothProbe);
+  assert.equal(r2.selectedRuntime, "podman");
+
+  // 3. Auto prefers docker when available
+  const autoCfg = loadSandboxConfig("/tmp/ws", { NANOGEM_CONTAINER_RUNTIME: "auto" });
+  const r3 = await resolveContainerRuntime(autoCfg, bothProbe);
+  assert.equal(r3.selectedRuntime, "docker");
+  const r3DockerOnly = await resolveContainerRuntime(autoCfg, dockerOnlyProbe);
+  assert.equal(r3DockerOnly.selectedRuntime, "docker");
+
+  // 4. Auto falls back to podman when docker is unavailable
+  const r4 = await resolveContainerRuntime(autoCfg, podmanOnlyProbe);
+  assert.equal(r4.selectedRuntime, "podman");
+});
+
+test("Runtime failures: 5. Explicit Docker fails, 6. Explicit Podman fails, 7. Neither available, 8. No host fallback", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-runtime-fail-"));
+  const marker = path.join(tmpWs, "host-must-not-run.txt");
+  try {
+    const podmanOnlyProbe = createMockProbe(new Set(["podman"]));
+    const dockerOnlyProbe = createMockProbe(new Set(["docker"]));
+    const neitherProbe = createMockProbe(new Set());
+
+    // 5. Explicit docker fails even when podman is available
+    const dockerCfg = loadSandboxConfig(tmpWs, { NANOGEM_CONTAINER_RUNTIME: "docker" });
+    const dockerStatus = await checkContainerRuntimeAvailability(dockerCfg, podmanOnlyProbe);
+    assert.equal(dockerStatus.available, false);
+    assert.equal(dockerStatus.selectedRuntime, null);
+    assert.match(dockerStatus.error || "", /'docker' is unavailable/);
+
+    // 6. Explicit podman fails even when docker is available
+    const podmanCfg = loadSandboxConfig(tmpWs, { NANOGEM_CONTAINER_RUNTIME: "podman" });
+    const podmanStatus = await checkContainerRuntimeAvailability(podmanCfg, dockerOnlyProbe);
+    assert.equal(podmanStatus.available, false);
+    assert.equal(podmanStatus.selectedRuntime, null);
+    assert.match(podmanStatus.error || "", /'podman' is unavailable/);
+
+    // 7. Neither runtime available in auto mode reports clear remediation
+    const autoCfg = loadSandboxConfig(tmpWs, {
+      NANOGEM_CONTAINER_RUNTIME: "auto",
+      NANOGEM_SANDBOX_IMAGE: "ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1",
+    });
+    const neitherStatus = await checkContainerRuntimeAvailability(autoCfg, neitherProbe);
+    assert.equal(neitherStatus.available, false);
+    assert.equal(neitherStatus.selectedRuntime, null);
+    assert.match(neitherStatus.error || "", /Neither Docker nor Podman/);
+    assert.match(neitherStatus.remediation || "", /Install Docker Desktop/);
+    assert.match(neitherStatus.remediation || "", /Podman/);
+
+    // 8. No silent host fallback when executing command without any runtime
+    const execRes = await executeSandboxCommandDetailed(
+      `node -e "require('fs').writeFileSync('host-must-not-run.txt','oops')"`,
+      autoCfg,
+      { probe: neitherProbe }
+    );
+    assert.equal(execRes.ok, false);
+    assert.match(execRes.output, /Sandbox Error:/);
+    await assert.rejects(fs.access(marker));
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+test("9. All hardened flags remain present when executing with either docker or podman", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-hardened-flags-"));
+  try {
+    for (const runtime of ["docker", "podman"] as const) {
+      const captured: Array<{ cmd: string; args: string[] }> = [];
+      const cfg = loadSandboxConfig(tmpWs, {
+        NANOGEM_EXECUTION_MODE: "docker",
+        NANOGEM_CONTAINER_RUNTIME: runtime,
+        NANOGEM_SANDBOX_IMAGE: "ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1",
+      });
+      const res = await executeSandboxCommandDetailed("echo hardened", cfg, {
+        probe: createMockProbe(new Set([runtime])),
+        spawnProcess: createCapturingSpawn(captured),
+      });
+      assert.equal(res.ok, true);
+      assert.equal(res.output, `ran-with:${runtime}`);
+      assert.equal(captured.length, 1);
+      assert.equal(captured[0].cmd, runtime);
+
+      const args = captured[0].args;
+      const directArgs = buildContainerRunArgs("echo hardened", cfg, "test-container");
+      assert.ok(args.includes("--rm"));
+      assert.ok(args.includes("--init"));
+      assert.ok(args.includes("--cap-drop=ALL"));
+      assert.ok(args.includes("--security-opt=no-new-privileges:true"));
+      assert.ok(args.includes("--read-only"));
+      assert.equal(args[args.indexOf("--user") + 1], "1000:1000");
+      assert.equal(args[args.indexOf("--network") + 1], "none");
+      assert.equal(args[args.indexOf("--cpus") + 1], "1.0");
+      assert.equal(args[args.indexOf("--memory") + 1], "512m");
+      assert.equal(args[args.indexOf("--memory-swap") + 1], "512m");
+      assert.equal(args[args.indexOf("--pids-limit") + 1], "64");
+      assert.ok(args.includes(`type=bind,source=${cfg.workspaceDir},target=/workspace`));
+      assert.equal(args.filter((a) => a === "--tmpfs").length, 2);
+      assert.equal(directArgs.includes("--cap-drop=ALL"), true);
+    }
+  } finally {
     await fs.rm(tmpWs, { recursive: true, force: true });
   }
 });

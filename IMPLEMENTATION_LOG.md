@@ -95,3 +95,9 @@
 - Expanded `tests/smoke.test.ts` browser API smoke checks across context, Git review/revert confirmation, schedules, workflow templates, and SSE `/api/agent/chat/stream` auth/readiness.
 - Executed full release-candidate checks: `npm ci`, `bash -n scripts/build-sandbox.sh`, `npm run lint`, `npm run build`, and `node --test tests/*.test.ts` (35/35 tests passed).
 - Created `RELEASE_CHECKLIST.md` documenting passed checks, blocked checks (`docker` absent locally), known limitations, and exact manual setup steps.
+
+## Stage 14 — Docker & Podman Container Runtime Detection
+- Added `NANOGEM_CONTAINER_RUNTIME=auto|docker|podman` (default `auto`) in `src/server/sandboxRuntime.ts`, preferring `docker` then `podman` in `auto` mode, requiring the explicit binary in `docker` or `podman` mode, failing closed with remediation instructions when unavailable, and preserving all hardened flags (`--rm`, `--init`, `--user`, `--cap-drop=ALL`, `--security-opt=no-new-privileges:true`, `--network`, `--read-only`, bounded `tmpfs`, `--cpus`, `--memory`, `--memory-swap`, `--pids-limit`, workspace-only bind mount, timeout cleanup, and secret stripping) with zero host fallback.
+- Exposed `containerRuntime` status (`selectedRuntime`, `configuredRuntime`, `available`, `imagePresent`, `image`, `network`, `executionMode`, `remediation`) in `/api/runtime/status`, `src/types.ts`, `src/components/Header.tsx`, and `src/components/SetupStatusPanel.tsx`.
+- Updated `.env.example`, `README.md`, `SECURITY.md`, and `RELEASE_CHECKLIST.md` with Docker and Podman runtime instructions and the immutable `sha-f8526c76498203b867960cd8bf244c04355f21a1` image reference.
+- Added 9 runtime detection/hardening regression tests in `tests/sandbox.test.ts` and `containerRuntime` checks in `tests/smoke.test.ts`.

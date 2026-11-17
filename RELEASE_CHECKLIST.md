@@ -6,8 +6,10 @@
 - **`npm run lint` (`tsc --noEmit`)**: Passed with 0 TypeScript errors.
 - **`npm run build` (`vite build` + `esbuild server.ts`)**: Passed (`dist/index.html`, `dist/assets/*`, `dist/server.cjs`).
 - **`bash -n scripts/build-sandbox.sh`**: Passed via Git Bash (`exit 0`).
-- **All unit, integration, and built-server smoke tests (`node --test tests/*.test.ts`)**: Passed **35 / 35** tests (`0` failures, `0` skipped), covering:
-  - Docker sandbox defaults, `NANOGEM_SANDBOX_IMAGE` / `NANOGEM_DOCKER_IMAGE`, fail-closed execution, host secret stripping, and path/symlink/dangling-symlink traversal protection (`tests/sandbox.test.ts`).
+- **All unit, integration, and built-server smoke tests (`node --test tests/*.test.ts`)**: Passed **39 / 39** tests (`0` failures, `0` skipped), covering:
+  - **Docker & Podman runtime detection (`NANOGEM_CONTAINER_RUNTIME=auto|docker|podman`)**:
+  - `tests/sandbox.test.ts` verifies: Docker selected, Podman selected, `auto` selecting Docker, `auto` selecting Podman when Docker is unavailable, explicit Docker failure, explicit Podman failure, neither runtime available with clear remediation, no silent host fallback, and all hardened container flags preserved across both `docker` and `podman`.
+- **Docker sandbox defaults, `NANOGEM_SANDBOX_IMAGE` / `NANOGEM_DOCKER_IMAGE`**, fail-closed execution, host secret stripping, and path/symlink/dangling-symlink traversal protection (`tests/sandbox.test.ts`).
   - Browser REST/SSE API smoke checks on built `dist/server.cjs`: non-loopback unauthenticated bind refusal, `401` auth enforcement on `/api/*` (including `/api/projects/:id/context`, `/api/schedules`, `/api/agent/chat/stream`), `403` cross-project session access, `400` unconfirmed Git revert, `503` placeholder `GEMINI_API_KEY`, JSON `404` for unknown `/api/*` routes, and SQLite persistence across server restart (`tests/smoke.test.ts`).
   - Reusable Gemini agent service: direct response, tool execution, tool/API failure events, and `maxTurns` termination (`tests/agentService.test.ts`).
   - Persistent SQLite projects/sessions and cross-project isolation (`tests/storage.test.ts`).

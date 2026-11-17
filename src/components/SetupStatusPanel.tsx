@@ -30,13 +30,20 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
   onOpenNewProject,
   onSelectTab,
 }) => {
+  const runtimeInfo = runtimeStatus?.containerRuntime ?? runtimeStatus?.docker;
   const isHostMode = runtimeStatus?.executionMode === "host";
-  const dockerAvailable = Boolean(runtimeStatus?.docker?.available);
-  const dockerImagePresent = Boolean(runtimeStatus?.docker?.imagePresent);
-  const dockerReady = dockerAvailable && dockerImagePresent;
-  const networkEnabled = Boolean(runtimeStatus?.docker?.networkEnabled);
+  const runtimeAvailable = Boolean(runtimeInfo?.available);
+  const imagePresent = Boolean(runtimeInfo?.imagePresent);
+  const sandboxReady = runtimeAvailable && imagePresent;
+  const networkEnabled = Boolean(runtimeInfo?.networkEnabled);
   const apiKeyConfigured = Boolean(runtimeStatus?.provider?.apiKeyConfigured);
   const projCtx = runtimeStatus?.projectContext;
+  const configuredImage =
+    runtimeInfo?.image ||
+    "ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1";
+  const selectedRuntimeLabel = runtimeInfo?.selectedRuntime
+    ? runtimeInfo.selectedRuntime
+    : "none";
 
   return (
     <div className="h-[calc(100vh-110px)] overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
@@ -48,7 +55,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
               NanoGem Readiness &amp; Security Posture
             </h2>
             <p className="text-xs text-slate-400">
-              Review runtime isolation, Gemini API key status, project instructions, and Telegram setup before running tasks.
+              Review container runtime availability (Docker or Podman), Gemini API key status, project instructions, and Telegram setup before running tasks.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -73,24 +80,24 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
 
         {/* Status Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {/* Sandbox Execution & Docker Readiness */}
+          {/* Container Runtime & Sandbox Readiness */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-slate-100">
                 <Container className="w-4 h-4 text-emerald-400" />
-                <span>Execution Sandbox</span>
+                <span>Container Sandbox Runtime</span>
               </div>
               {isHostMode ? (
                 <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold">
                   Host Mode (Unsafe Opt-In)
                 </span>
-              ) : dockerReady ? (
+              ) : sandboxReady ? (
                 <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
-                  Docker Ready
+                  {selectedRuntimeLabel === "podman" ? "Podman Ready" : "Docker Ready"}
                 </span>
               ) : (
                 <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 font-bold">
-                  Docker Unavailable
+                  {runtimeAvailable ? "Sandbox Image Missing" : "Runtime Unavailable"}
                 </span>
               )}
             </div>
@@ -105,39 +112,53 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 text-slate-300">
+              <div className="space-y-2 text-slate-300 text-[11px]">
                 <p>
-                  Image: <code className="text-emerald-300">{runtimeStatus?.docker?.image}</code>
+                  Execution Mode: <code className="text-emerald-300">{runtimeStatus?.executionMode || "docker"}</code> | Configured Runtime:{" "}
+                  <code>{runtimeInfo?.configuredRuntime || "auto"}</code>
                 </p>
                 <p>
-                  User: <code>{runtimeStatus?.docker?.user}</code> | Read-only rootfs:{" "}
-                  <code>{String(runtimeStatus?.docker?.readOnly)}</code>
+                  Selected Runtime:{" "}
+                  <code className={runtimeAvailable ? "text-emerald-300" : "text-rose-300"}>
+                    {selectedRuntimeLabel}
+                  </code>{" "}
+                  ({runtimeAvailable ? `Available${runtimeInfo?.serverVersion ? ` v${runtimeInfo.serverVersion}` : ""}` : "Unavailable"})
+                </p>
+                <p>
+                  Configured Image: <code className="text-emerald-300 break-all">{configuredImage}</code>
+                </p>
+                <p>
+                  User: <code>{runtimeInfo?.user || "1000:1000"}</code> | Read-only rootfs:{" "}
+                  <code>{String(runtimeInfo?.readOnly ?? true)}</code>
                 </p>
                 {networkEnabled ? (
                   <p className="text-amber-300 flex items-center gap-1.5">
                     <Wifi className="w-3.5 h-3.5" />
                     <span>
-                      Warning: Container network is enabled (<code>{runtimeStatus?.docker?.network}</code>). Default is <code>none</code>.
+                      Network Policy: <code>{runtimeInfo?.network}</code> (Enabled — default is <code>none</code>)
                     </span>
                   </p>
                 ) : (
                   <p className="text-emerald-300 flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Container network disabled (<code>--network=none</code>)</span>
+                    <span>Network Policy: <code>{runtimeInfo?.network || "none"}</code> (Disabled)</span>
                   </p>
                 )}
-                {!dockerReady && (
-                  <div className="bg-rose-950/30 border border-rose-500/40 rounded-lg p-3 text-rose-200 space-y-1.5">
-                    <p className="font-bold">Recovery Steps:</p>
-                    <p className="text-[11px]">
-                      {runtimeStatus?.docker?.error ||
-                        "Docker daemon or sandbox image is not ready."}
-                    </p>
+
+                {!sandboxReady && (
+                  <div className="bg-rose-950/30 border border-rose-500/40 rounded-lg p-3 text-rose-200 space-y-2">
+                    <p className="font-bold">Remediation Required (Fail-Closed — No Host Fallback):</p>
+                    <p>{runtimeInfo?.error || "Neither Docker nor Podman is available."}</p>
+                    {runtimeInfo?.remediation && <p className="text-amber-200">{runtimeInfo.remediation}</p>}
                     <pre className="bg-slate-950 p-2 rounded text-[11px] overflow-x-auto text-emerald-300">
-{`# Pull prebuilt image or build locally (Docker/Podman required at runtime):
-docker pull ${runtimeStatus?.docker?.image || "ghcr.io/jqcvsc/nanogem-sandbox:latest"}
-# Or build locally:
-./scripts/build-sandbox.sh`}
+{`# Option A (Docker Desktop on Windows):
+winget install -e --id Docker.DockerDesktop
+docker pull ${configuredImage}
+
+# Option B (Podman on Windows):
+winget install -e --id RedHat.Podman
+podman machine init && podman machine start
+podman pull ${configuredImage}`}
                     </pre>
                   </div>
                 )}

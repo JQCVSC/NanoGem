@@ -36,7 +36,7 @@ import {
   loadServerSecurityConfig,
 } from "./src/server/auth.ts";
 import {
-  checkDockerAvailability,
+  checkContainerRuntimeAvailability,
   executeSandboxCommand,
   loadSandboxConfig,
 } from "./src/server/sandboxRuntime.ts";
@@ -338,11 +338,11 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Runtime sandbox posture, provider readiness, Telegram, and active project status
+// Runtime sandbox posture, container runtime detection, provider readiness, Telegram, and active project status
 app.get("/api/runtime/status", async (req, res) => {
-  const docker =
+  const runtimeProbe =
     sandboxConfig.executionMode === "docker"
-      ? await checkDockerAvailability(sandboxConfig)
+      ? await checkContainerRuntimeAvailability(sandboxConfig)
       : null;
 
   const projectId =
@@ -366,6 +366,28 @@ app.get("/api/runtime/status", async (req, res) => {
     };
   }
 
+  const runtimeDetails =
+    sandboxConfig.executionMode === "docker" && runtimeProbe
+      ? {
+          configuredRuntime: runtimeProbe.configuredRuntime,
+          selectedRuntime: runtimeProbe.selectedRuntime,
+          image: runtimeProbe.image,
+          user: sandboxConfig.dockerUser,
+          network: runtimeProbe.network,
+          networkEnabled: runtimeProbe.networkEnabled,
+          executionMode: runtimeProbe.executionMode,
+          cpus: sandboxConfig.dockerCpus,
+          memory: sandboxConfig.dockerMemory,
+          pidsLimit: sandboxConfig.dockerPidsLimit,
+          readOnly: sandboxConfig.dockerReadOnly,
+          available: runtimeProbe.available,
+          imagePresent: runtimeProbe.imagePresent,
+          serverVersion: runtimeProbe.serverVersion,
+          error: runtimeProbe.error,
+          remediation: runtimeProbe.remediation,
+        }
+      : null;
+
   res.json({
     executionMode: sandboxConfig.executionMode,
     authRequired: securityConfig.authRequired,
@@ -375,20 +397,8 @@ app.get("/api/runtime/status", async (req, res) => {
       displayName: agentProvider.displayName,
       apiKeyConfigured: agentProvider.isConfigured(),
     },
-    docker:
-      sandboxConfig.executionMode === "docker"
-        ? {
-            image: sandboxConfig.dockerImage,
-            user: sandboxConfig.dockerUser,
-            network: sandboxConfig.dockerNetwork,
-            networkEnabled: sandboxConfig.dockerNetwork.toLowerCase() !== "none",
-            cpus: sandboxConfig.dockerCpus,
-            memory: sandboxConfig.dockerMemory,
-            pidsLimit: sandboxConfig.dockerPidsLimit,
-            readOnly: sandboxConfig.dockerReadOnly,
-            ...docker,
-          }
-        : null,
+    containerRuntime: runtimeDetails,
+    docker: runtimeDetails,
     telegram: {
       configured: telegramConfig.enabled,
       polling: telegramConfig.enabled && telegramConfig.polling,
@@ -1322,7 +1332,7 @@ export async function startServer() {
       );
     } else {
       console.log(
-        `[NanoGemini Sandbox] Docker image=${sandboxConfig.dockerImage}, user=${sandboxConfig.dockerUser}, ` +
+        `[NanoGemini Sandbox] runtime=${sandboxConfig.containerRuntime}, image=${sandboxConfig.dockerImage}, user=${sandboxConfig.dockerUser}, ` +
           `network=${sandboxConfig.dockerNetwork}, cpus=${sandboxConfig.dockerCpus}, ` +
           `memory=${sandboxConfig.dockerMemory}, pids=${sandboxConfig.dockerPidsLimit}`
       );

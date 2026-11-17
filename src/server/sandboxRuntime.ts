@@ -8,9 +8,12 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 
 export type ExecutionMode = "docker" | "host";
+export type ContainerRuntimePreference = "auto" | "docker" | "podman";
+export type ContainerRuntimeExecutable = "docker" | "podman";
 
 export interface SandboxConfig {
   executionMode: ExecutionMode;
+  containerRuntime: ContainerRuntimePreference;
   workspaceDir: string;
   dockerImage: string;
   dockerUser: string;
@@ -23,11 +26,36 @@ export interface SandboxConfig {
   maxOutputBytes: number;
 }
 
-export interface DockerStatus {
+export interface ContainerRuntimeStatus {
+  configuredRuntime: ContainerRuntimePreference;
+  selectedRuntime: ContainerRuntimeExecutable | null;
   available: boolean;
   imagePresent: boolean;
+  image: string;
+  network: string;
+  networkEnabled: boolean;
+  executionMode: ExecutionMode;
   serverVersion?: string;
   error?: string;
+  remediation?: string;
+}
+
+export type DockerStatus = ContainerRuntimeStatus;
+
+export interface RuntimeProbeResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}
+
+export type RuntimeProbeFn = (
+  runtime: ContainerRuntimeExecutable,
+  args: string[]
+) => Promise<RuntimeProbeResult>;
+
+export interface SandboxRuntimeDeps {
+  probe?: RuntimeProbeFn;
+  spawnProcess?: typeof spawn;
 }
 
 export interface SandboxCommandResult {
@@ -105,6 +133,16 @@ function validateSimpleToken(raw: string | undefined, fallback: string, name: st
   return value;
 }
 
+function validateContainerRuntime(raw: string | undefined): ContainerRuntimePreference {
+  const value = raw?.trim().toLowerCase() || "auto";
+  if (value !== "auto" && value !== "docker" && value !== "podman") {
+    throw new Error(
+      `Invalid NANOGEM_CONTAINER_RUNTIME "${value}". Supported values are "auto", "docker", or "podman".`
+    );
+  }
+  return value;
+}
+
 export function loadSandboxConfig(
   workspaceDir: string,
   env: NodeJS.ProcessEnv = process.env
@@ -116,6 +154,7 @@ export function loadSandboxConfig(
     );
   }
 
+  const containerRuntime = validateContainerRuntime(env.NANOGEM_CONTAINER_RUNTIME);
   const hasSandboxImage = env.NANOGEM_SANDBOX_IMAGE !== undefined && env.NANOGEM_SANDBOX_IMAGE.trim() !== "";
   const dockerImage = validateSimpleToken(
     hasSandboxImage ? env.NANOGEM_SANDBOX_IMAGE : env.NANOGEM_DOCKER_IMAGE,
@@ -125,6 +164,7 @@ export function loadSandboxConfig(
 
   return {
     executionMode: rawMode,
+    containerRuntime,
     workspaceDir: path.resolve(workspaceDir),
     dockerImage,
     dockerUser: validateDockerUser(env.NANOGEM_DOCKER_USER),
@@ -304,9 +344,13 @@ function formatCommandOutput(stdout: string, stderr: string, truncated: boolean)
   return truncated ? `${trimmed}\n\n[Output truncated at limit]` : trimmed;
 }
 
-function cleanupDockerContainer(containerName: string): void {
+function cleanupContainer(
+  runtime: ContainerRuntimeExecutable,
+  containerName: string,
+  spawnImpl: typeof spawn = spawn
+): void {
   try {
-    const killer = spawn("docker", ["rm", "-f", containerName], {
+    const killer = spawnImpl(runtime, ["rm", "-f", containerName], {
       stdio: "ignore",
       shell: false,
     });
@@ -318,12 +362,96 @@ function cleanupDockerContainer(containerName: string): void {
   }
 }
 
-async function executeInDockerDetailed(
+export function buildContainerRunArgs(
   command: string,
-  config: SandboxConfig
+  config: SandboxConfig,
+  containerName: string
+): string[] {
+  return buildDockerRunArgs(command, config, containerName);
+}
+
+const RUNTIME_REMEDIATION =
+  "Install Docker Desktop (https://docs.docker.com/get-docker/ or 'winget install -e --id Docker.DockerDesktop') " +
+  "or Podman (https://podman.io/get-started or 'winget install -e --id RedHat.Podman' + 'podman machine init && podman machine start'), " +
+  "then pull the sandbox image.";
+
+async function probeEngineInfo(
+  runtime: ContainerRuntimeExecutable,
+  probeFn: RuntimeProbeFn
+): Promise<RuntimeProbeResult> {
+  const format =
+    runtime === "docker" ? "{{.ServerVersion}}" : "{{.Version.Version}}";
+  return probeFn(runtime, ["info", "--format", format]);
+}
+
+export async function resolveContainerRuntime(
+  config: SandboxConfig,
+  probeFn: RuntimeProbeFn = runRuntimeProbe
+): Promise<{
+  selectedRuntime: ContainerRuntimeExecutable | null;
+  serverVersion?: string;
+  error?: string;
+  remediation?: string;
+}> {
+  if (config.containerRuntime === "docker") {
+    const dockerInfo = await probeEngineInfo("docker", probeFn);
+    if (dockerInfo.ok) {
+      return { selectedRuntime: "docker", serverVersion: dockerInfo.stdout || undefined };
+    }
+    return {
+      selectedRuntime: null,
+      error: `Required container runtime 'docker' is unavailable (${dockerInfo.stderr || "Docker daemon not reachable"}).`,
+      remediation: `Start Docker or install Docker Desktop, then pull '${config.dockerImage}'. ${RUNTIME_REMEDIATION}`,
+    };
+  }
+
+  if (config.containerRuntime === "podman") {
+    const podmanInfo = await probeEngineInfo("podman", probeFn);
+    if (podmanInfo.ok) {
+      return { selectedRuntime: "podman", serverVersion: podmanInfo.stdout || undefined };
+    }
+    return {
+      selectedRuntime: null,
+      error: `Required container runtime 'podman' is unavailable (${podmanInfo.stderr || "Podman engine not reachable"}).`,
+      remediation: `Install/start Podman ('podman machine init && podman machine start'), then pull '${config.dockerImage}'. ${RUNTIME_REMEDIATION}`,
+    };
+  }
+
+  // NANOGEM_CONTAINER_RUNTIME=auto: prefer docker if available, otherwise podman. Never fall back to host.
+  const dockerInfo = await probeEngineInfo("docker", probeFn);
+  if (dockerInfo.ok) {
+    return { selectedRuntime: "docker", serverVersion: dockerInfo.stdout || undefined };
+  }
+
+  const podmanInfo = await probeEngineInfo("podman", probeFn);
+  if (podmanInfo.ok) {
+    return { selectedRuntime: "podman", serverVersion: podmanInfo.stdout || undefined };
+  }
+
+  return {
+    selectedRuntime: null,
+    error: "Neither Docker nor Podman container runtime is available.",
+    remediation: RUNTIME_REMEDIATION,
+  };
+}
+
+async function executeInContainerDetailed(
+  command: string,
+  config: SandboxConfig,
+  deps: SandboxRuntimeDeps = {}
 ): Promise<SandboxCommandResult> {
+  const probeFn = deps.probe ?? runRuntimeProbe;
+  const spawnImpl = deps.spawnProcess ?? spawn;
+
+  const resolved = await resolveContainerRuntime(config, probeFn);
+  if (!resolved.selectedRuntime) {
+    const message = `Sandbox Error: ${resolved.error} ${resolved.remediation || ""}`.trim();
+    return { ok: false, output: message, exitCode: null, error: message };
+  }
+
+  const runtime = resolved.selectedRuntime;
   const containerName = `nanogem-exec-${crypto.randomUUID()}`;
-  const args = buildDockerRunArgs(command, config, containerName);
+  const args = buildContainerRunArgs(command, config, containerName);
 
   return new Promise<SandboxCommandResult>((resolve) => {
     let stdout = "";
@@ -332,7 +460,7 @@ async function executeInDockerDetailed(
     let timedOut = false;
     let settled = false;
 
-    const child = spawn("docker", args, {
+    const child = spawnImpl(runtime, args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
@@ -346,9 +474,9 @@ async function executeInDockerDetailed(
 
     const timer = setTimeout(() => {
       timedOut = true;
-      cleanupDockerContainer(containerName);
+      cleanupContainer(runtime, containerName, spawnImpl);
       child.kill("SIGKILL");
-      const message = `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds (container terminated).`;
+      const message = `Error: Command timed out after ${Math.round(config.timeoutMs / 1000)} seconds (${runtime} container terminated).`;
       finish({ ok: false, output: message, exitCode: null, error: message });
     }, config.timeoutMs);
 
@@ -365,13 +493,7 @@ async function executeInDockerDetailed(
     });
 
     child.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "ENOENT") {
-        const message =
-          "Sandbox Error: Docker CLI ('docker') was not found on PATH. NanoGem requires Docker by default. Install/start Docker and run ./scripts/build-sandbox.sh, or explicitly set NANOGEM_EXECUTION_MODE=host to run without container isolation.";
-        finish({ ok: false, output: message, exitCode: null, error: message });
-        return;
-      }
-      const message = `Sandbox Error: Failed to start Docker container: ${err.message}`;
+      const message = `Sandbox Error: Failed to start ${runtime} container: ${err.message}`;
       finish({ ok: false, output: message, exitCode: null, error: message });
     });
 
@@ -383,12 +505,12 @@ async function executeInDockerDetailed(
       }
       const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
       const hint =
-        /Unable to find image|No such image/i.test(stderr)
-          ? `\nHint: Pull or build the sandbox image first (expected image: ${config.dockerImage}; e.g. 'docker pull ${config.dockerImage}' or './scripts/build-sandbox.sh').`
-          : /Cannot connect to the Docker daemon|is the docker daemon running/i.test(stderr)
-            ? "\nHint: Ensure the Docker daemon is running."
+        /Unable to find image|No such image|image not known/i.test(stderr)
+          ? `\nHint: Pull or build the sandbox image first (expected image: ${config.dockerImage}; e.g. '${runtime} pull ${config.dockerImage}' or './scripts/build-sandbox.sh').`
+          : /Cannot connect to the Docker daemon|is the docker daemon running|cannot connect to Podman/i.test(stderr)
+            ? `\nHint: Ensure the ${runtime} daemon/machine is running.`
             : "";
-      const message = `Error executing command (exit code ${code ?? "unknown"}):\n${combined}${hint}`.trim();
+      const message = `Error executing command via ${runtime} (exit code ${code ?? "unknown"}):\n${combined}${hint}`.trim();
       finish({ ok: false, output: message, exitCode: code, error: message });
     });
   });
@@ -437,7 +559,8 @@ async function executeOnHostDetailed(
 
 export async function executeSandboxCommandDetailed(
   command: string,
-  config: SandboxConfig
+  config: SandboxConfig,
+  deps: SandboxRuntimeDeps = {}
 ): Promise<SandboxCommandResult> {
   if (typeof command !== "string" || !command.trim()) {
     const message = "Error: Command must be a non-empty string.";
@@ -446,20 +569,25 @@ export async function executeSandboxCommandDetailed(
   if (config.executionMode === "host") {
     return executeOnHostDetailed(command, config);
   }
-  return executeInDockerDetailed(command, config);
+  return executeInContainerDetailed(command, config, deps);
 }
 
 export async function executeSandboxCommand(
   command: string,
-  config: SandboxConfig
+  config: SandboxConfig,
+  deps: SandboxRuntimeDeps = {}
 ): Promise<string> {
-  const result = await executeSandboxCommandDetailed(command, config);
+  const result = await executeSandboxCommandDetailed(command, config, deps);
   return result.output;
 }
 
-function runDockerProbe(args: string[], timeoutMs = 3000): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+function runRuntimeProbe(
+  runtime: ContainerRuntimeExecutable,
+  args: string[],
+  timeoutMs = 3000
+): Promise<RuntimeProbeResult> {
   return new Promise((resolve) => {
-    const child = spawn("docker", args, {
+    const child = spawn(runtime, args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
     });
@@ -471,7 +599,7 @@ function runDockerProbe(args: string[], timeoutMs = 3000): Promise<{ ok: boolean
       if (done) return;
       done = true;
       child.kill("SIGKILL");
-      resolve({ ok: false, stdout, stderr: "Docker command timed out" });
+      resolve({ ok: false, stdout, stderr: `${runtime} command timed out` });
     }, timeoutMs);
 
     child.stdout?.on("data", (d: Buffer) => {
@@ -495,23 +623,52 @@ function runDockerProbe(args: string[], timeoutMs = 3000): Promise<{ ok: boolean
   });
 }
 
-export async function checkDockerAvailability(config: SandboxConfig): Promise<DockerStatus> {
-  const info = await runDockerProbe(["info", "--format", "{{.ServerVersion}}"]);
-  if (!info.ok) {
+export async function checkContainerRuntimeAvailability(
+  config: SandboxConfig,
+  probeFn: RuntimeProbeFn = runRuntimeProbe
+): Promise<ContainerRuntimeStatus> {
+  const networkEnabled = config.dockerNetwork.toLowerCase() !== "none";
+  const resolved = await resolveContainerRuntime(config, probeFn);
+
+  if (!resolved.selectedRuntime) {
     return {
+      configuredRuntime: config.containerRuntime,
+      selectedRuntime: null,
       available: false,
       imagePresent: false,
-      error: info.stderr || "Docker daemon is unavailable.",
+      image: config.dockerImage,
+      network: config.dockerNetwork,
+      networkEnabled,
+      executionMode: config.executionMode,
+      error: resolved.error,
+      remediation: resolved.remediation,
     };
   }
 
-  const image = await runDockerProbe(["image", "inspect", "--format", "{{.Id}}", config.dockerImage]);
+  const runtime = resolved.selectedRuntime;
+  const image = await probeFn(runtime, ["image", "inspect", "--format", "{{.Id}}", config.dockerImage]);
   return {
+    configuredRuntime: config.containerRuntime,
+    selectedRuntime: runtime,
     available: true,
     imagePresent: image.ok,
-    serverVersion: info.stdout || undefined,
+    image: config.dockerImage,
+    network: config.dockerNetwork,
+    networkEnabled,
+    executionMode: config.executionMode,
+    serverVersion: resolved.serverVersion,
     error: image.ok
       ? undefined
-      : `Sandbox image '${config.dockerImage}' not found. Pull it or run ./scripts/build-sandbox.sh.`,
+      : `Sandbox image '${config.dockerImage}' not found in ${runtime}.`,
+    remediation: image.ok
+      ? undefined
+      : `Run '${runtime} pull ${config.dockerImage}' or './scripts/build-sandbox.sh'.`,
   };
+}
+
+export async function checkDockerAvailability(
+  config: SandboxConfig,
+  probeFn: RuntimeProbeFn = runRuntimeProbe
+): Promise<DockerStatus> {
+  return checkContainerRuntimeAvailability(config, probeFn);
 }

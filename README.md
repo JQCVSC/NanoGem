@@ -65,8 +65,17 @@ NanoGem/
 
 ### Prerequisites
 - Node.js 20+ (tested on Node 26 with built-in `node:sqlite`) and npm
-- Docker or Podman installed and running at runtime (required for default `docker` execution mode, even when using a prebuilt CI image)
+- Docker or Podman installed and running at runtime (required for default `NANOGEM_EXECUTION_MODE=docker`, even when using a prebuilt CI image)
 - A Google Gemini API Key
+
+Manual container runtime installation (choose one):
+- **Docker Desktop (Windows)**: `winget install -e --id Docker.DockerDesktop` (macOS/Linux: see `https://docs.docker.com/get-docker/`)
+- **Podman (Windows)**: `winget install -e --id RedHat.Podman`, then run `podman machine init && podman machine start` (Linux: `sudo apt-get install -y podman` or distro package manager)
+
+Control runtime selection via `NANOGEM_CONTAINER_RUNTIME`:
+- `auto` (default): prefers `docker` if available, otherwise uses `podman`, and fails closed if neither is available.
+- `docker`: requires `docker` and fails closed if unavailable.
+- `podman`: requires `podman` and fails closed if unavailable.
 
 ### 1. Install Dependencies & Obtain the Sandbox Image
 ```bash
@@ -76,24 +85,30 @@ cd NanoGem
 npm ci
 ```
 
-Obtain `nanogem-sandbox` using one of these options (note: CI builds remove the need to build locally, **not** the need for Docker/Podman at runtime):
+Obtain `nanogem-sandbox` using one of these options (note: CI builds remove the need to build locally, **not** the need for Docker or Podman at runtime):
 
 - **Option A — Pull prebuilt image from GHCR (recommended):**
   GitHub Actions (`.github/workflows/docker-sandbox.yml`) builds `Dockerfile` with Buildx, runs hardened container smoke tests, and on `main` publishes `ghcr.io/jqcvsc/nanogem-sandbox` with both `sha-<full-commit-sha>` and `latest`.
-  - **Repeatable / production setups (recommended):** pin an immutable commit tag:
+  - **Repeatable / production setups (recommended):** pin an immutable commit tag (e.g., `sha-f8526c76498203b867960cd8bf244c04355f21a1`):
     ```bash
-    docker pull ghcr.io/jqcvsc/nanogem-sandbox:sha-<full-commit-sha>
+    docker pull ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1
+    # or with Podman:
+    podman pull ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1
     ```
-    Set `NANOGEM_SANDBOX_IMAGE=ghcr.io/jqcvsc/nanogem-sandbox:sha-<full-commit-sha>` in `.env`.
+    Set `NANOGEM_SANDBOX_IMAGE=ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1` in `.env`.
   - **Local development convenience:** track `latest`:
     ```bash
     docker pull ghcr.io/jqcvsc/nanogem-sandbox:latest
+    # or with Podman:
+    podman pull ghcr.io/jqcvsc/nanogem-sandbox:latest
     ```
     Set `NANOGEM_SANDBOX_IMAGE=ghcr.io/jqcvsc/nanogem-sandbox:latest` in `.env`.
 - **Option B — Download GitHub Actions artifact:**
   Download `nanogem-sandbox-image` (`nanogem-sandbox-latest.tar.gz`) from **Actions → Build Sandbox Docker Image** on `https://github.com/JQCVSC/NanoGem` and run:
   ```bash
   docker load < nanogem-sandbox-latest.tar.gz
+  # or with Podman:
+  podman load < nanogem-sandbox-latest.tar.gz
   ```
 - **Option C — Build locally:**
   ```bash
@@ -202,8 +217,9 @@ NanoGem executes commands and stores SQLite sessions/files locally on your machi
 | `HOST` | `127.0.0.1` | Bind address (`0.0.0.0` requires `NANOGEM_API_TOKEN`) |
 | `PORT` | `3000` | HTTP server port |
 | `NANOGEM_API_TOKEN` | `""` | Bearer / `X-NanoGem-Token` auth secret (`>= 16` chars for public bind) |
-| `NANOGEM_EXECUTION_MODE` | `docker` | `"docker"` (default, fail-closed) or explicit `"host"` (local dev only) |
-| `NANOGEM_SANDBOX_IMAGE` | `nanogem-sandbox:latest` | Sandbox image (`ghcr.io/jqcvsc/nanogem-sandbox:sha-<commit>` recommended; `NANOGEM_DOCKER_IMAGE` alias supported) |
+| `NANOGEM_EXECUTION_MODE` | `docker` | `"docker"` (default, containerized fail-closed) or explicit `"host"` (local dev only) |
+| `NANOGEM_CONTAINER_RUNTIME` | `auto` | `"auto"` (Docker then Podman), `"docker"` (require Docker), or `"podman"` (require Podman) |
+| `NANOGEM_SANDBOX_IMAGE` | `nanogem-sandbox:latest` | Sandbox image (`ghcr.io/jqcvsc/nanogem-sandbox:sha-f8526c76498203b867960cd8bf244c04355f21a1` recommended; `NANOGEM_DOCKER_IMAGE` alias supported) |
 | `NANOGEM_DOCKER_USER` | `1000:1000` | Non-root UID:GID (`0` / `root` rejected) |
 | `NANOGEM_DOCKER_NETWORK` | `none` | Container network mode (`none` disables networking) |
 | `NANOGEM_DOCKER_CPUS` | `1.0` | CPU quota (`--cpus`) |

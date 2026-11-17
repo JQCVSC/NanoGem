@@ -44,6 +44,25 @@ export interface AgentSettings {
   sandboxDir: string;
 }
 
+export interface ContainerRuntimeInfo {
+  configuredRuntime?: "auto" | "docker" | "podman";
+  selectedRuntime?: "docker" | "podman" | null;
+  image: string;
+  user: string;
+  network: string;
+  networkEnabled?: boolean;
+  executionMode?: "docker" | "host";
+  cpus: string;
+  memory: string;
+  pidsLimit: number;
+  readOnly: boolean;
+  available: boolean;
+  imagePresent: boolean;
+  serverVersion?: string;
+  error?: string;
+  remediation?: string;
+}
+
 export interface RuntimeStatus {
   executionMode: "docker" | "host";
   authRequired: boolean;
@@ -53,20 +72,8 @@ export interface RuntimeStatus {
     displayName: string;
     apiKeyConfigured: boolean;
   };
-  docker: {
-    image: string;
-    user: string;
-    network: string;
-    networkEnabled?: boolean;
-    cpus: string;
-    memory: string;
-    pidsLimit: number;
-    readOnly: boolean;
-    available: boolean;
-    imagePresent: boolean;
-    serverVersion?: string;
-    error?: string;
-  } | null;
+  containerRuntime?: ContainerRuntimeInfo | null;
+  docker: ContainerRuntimeInfo | null;
   telegram?: {
     configured: boolean;
     polling: boolean;

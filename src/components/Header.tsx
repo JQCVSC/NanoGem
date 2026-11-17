@@ -48,9 +48,11 @@ export const Header: React.FC<HeaderProps> = ({
   runtimeStatus,
   isExecuting,
 }) => {
+  const runtimeInfo = runtimeStatus?.containerRuntime ?? runtimeStatus?.docker;
   const isHostMode = runtimeStatus?.executionMode === "host";
-  const dockerReady = Boolean(runtimeStatus?.docker?.available && runtimeStatus?.docker?.imagePresent);
-  const networkEnabled = Boolean(runtimeStatus?.docker?.networkEnabled);
+  const dockerReady = Boolean(runtimeInfo?.available && runtimeInfo?.imagePresent);
+  const selectedRuntime = runtimeInfo?.selectedRuntime;
+  const networkEnabled = Boolean(runtimeInfo?.networkEnabled);
   const missingContext =
     runtimeStatus?.projectContext &&
     !runtimeStatus.projectContext.hasGeminiMd &&
@@ -83,10 +85,11 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => setActiveTab("setup")}
-                  title={runtimeStatus.docker?.error || "Docker daemon or sandbox image unavailable"}
+                  title={runtimeInfo?.error || "Docker/Podman runtime or sandbox image unavailable"}
                   className="px-2 py-0.5 text-xs font-mono bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-full flex items-center gap-1"
                 >
-                  <ShieldAlert className="w-3 h-3" /> Docker Not Ready
+                  <ShieldAlert className="w-3 h-3" />{" "}
+                  {runtimeInfo?.available ? "Image Missing" : "Runtime Not Ready"}
                 </button>
               ) : (
                 <button
@@ -94,7 +97,8 @@ export const Header: React.FC<HeaderProps> = ({
                   onClick={() => setActiveTab("setup")}
                   className="px-2 py-0.5 text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full flex items-center gap-1"
                 >
-                  <ShieldCheck className="w-3 h-3" /> Docker Sandboxed
+                  <ShieldCheck className="w-3 h-3" />{" "}
+                  {selectedRuntime === "podman" ? "Podman Sandboxed" : "Docker Sandboxed"}
                 </button>
               )}
               {networkEnabled && (
