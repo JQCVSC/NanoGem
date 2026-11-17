@@ -85,3 +85,7 @@
 - Added `src/components/SetupStatusPanel.tsx` (`Setup & Status` tab) covering Docker/runtime readiness with recovery commands, hidden Gemini API key setup instructions, host/network safety status, project creation/import shortcut, Telegram setup guide, and links to `SECURITY.md` and `README.md`.
 - Updated `src/components/Header.tsx` and `src/App.tsx` to display clear status pills when Docker is unavailable, host mode is active, container network is enabled, project instructions/memory are missing, a task is running, or Git changes are uncommitted.
 - Expanded `tests/smoke.test.ts` to verify runtime status telemetry and non-disclosure of credentials.
+
+## Stage 12 — Documentation & Website Copy
+- Created `WEBSITE_COPY.md` aligned with implemented behavior (positioning NanoGem as a Gemini-native coding agent for local projects with a boundary around autonomous execution, without unsupported privacy/offline/provider claims).
+- Updated `README.md`, `SECURITY.md`, and `.env.example` covering browser workflow, Docker sandbox, project memory, Git review, Telegram setup, opt-in scheduled tasks, Gemini API data-handling limitations, safe deployment guidance, troubleshooting, configuration reference, and security disclosure process.
