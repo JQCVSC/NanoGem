@@ -14,6 +14,7 @@ import {
   RuntimeStatus,
   ProjectSummary,
   SessionSummary,
+  AgentProgressEvent,
 } from "./types";
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
@@ -22,6 +23,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [progressEvents, setProgressEvents] = useState<AgentProgressEvent[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -233,6 +235,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
 
     const previousMessages = [...messages];
     setMessages([...previousMessages, newUserMsg]);
+    setProgressEvents([]);
     setIsExecuting(true);
 
     try {
@@ -241,7 +244,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         content: m.content,
       }));
 
-      const res = await apiFetch("/api/agent/chat", {
+      const res = await apiFetch("/api/agent/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -255,10 +258,55 @@ Always think step-by-step. Use your tools immediately when needed without asking
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error || "Failed to communicate with NanoGemini Agent");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to communicate with NanoGemini Agent");
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      let data: any = null;
+
+      if (contentType.includes("text/event-stream") && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const blocks = buffer.split("\n\n");
+          buffer = blocks.pop() || "";
+
+          for (const block of blocks) {
+            const lines = block.split(/\r?\n/);
+            let eventName = "message";
+            const dataLines: string[] = [];
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventName = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+              }
+            }
+            if (dataLines.length === 0) continue;
+            const parsed = JSON.parse(dataLines.join("\n"));
+            if (eventName === "progress") {
+              setProgressEvents((prev) => [...prev, parsed]);
+            } else if (eventName === "result") {
+              data = parsed;
+            } else if (eventName === "error") {
+              throw new Error(parsed.error || "Agent execution failed.");
+            }
+          }
+        }
+      } else {
+        data = await res.json();
+      }
+
+      if (!data) {
+        throw new Error("Stream ended before returning a final response.");
       }
 
       if (data.sessionId && data.sessionId !== activeSessionId) {
@@ -447,6 +495,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
             onSendMessage={handleSendMessage}
             onSaveToMemory={handleSaveToProjectMemory}
             isExecuting={isExecuting}
+            progressEvents={progressEvents}
             onSelectTab={(tab) => setActiveTab(tab)}
           />
         )}

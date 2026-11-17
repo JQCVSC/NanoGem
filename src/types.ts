@@ -82,3 +82,20 @@ export interface SessionSummary {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface AgentProgressEvent {
+  id: string;
+  stage:
+    | "analyzing_request"
+    | "calling_gemini"
+    | "running_command"
+    | "command_completed"
+    | "command_failed"
+    | "reviewing_changes"
+    | "finished"
+    | "error";
+  label: string;
+  detail?: string;
+  turn: number;
+  timestamp: string;
+}

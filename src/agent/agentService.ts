@@ -93,6 +93,8 @@ export interface GeminiGenerateContentClient {
   };
 }
 
+export type AgentPhase = "analyzing_request" | "calling_gemini" | "reviewing_changes";
+
 export interface AgentRunInput {
   message: string;
   history?: AgentHistoryMessage[];
@@ -103,6 +105,7 @@ export interface AgentRunInput {
   protectContextFiles?: boolean;
   sandboxConfig: SandboxConfig;
   onEvent?: (event: AgentEvent) => void | Promise<void>;
+  onPhase?: (phase: AgentPhase, turn: number) => void | Promise<void>;
 }
 
 export interface AgentRunResult {
@@ -286,10 +289,15 @@ export async function runGeminiAgent(
   const currentContents = buildInitialContents(input.message, input.history);
 
   try {
+    await input.onPhase?.("analyzing_request", 0);
     const client = deps.client ?? createDefaultGeminiClient(deps.apiKey);
 
     while (currentTurnCount < maxTurns) {
       currentTurnCount++;
+      await input.onPhase?.(
+        currentTurnCount === 1 ? "calling_gemini" : "reviewing_changes",
+        currentTurnCount
+      );
 
       const response = await client.models.generateContent({
         model,

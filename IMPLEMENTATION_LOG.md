@@ -39,3 +39,10 @@
 - Added `/api/projects/:projectId/context` (`GET`/`PUT`) and `/api/projects/:projectId/memory/append` (`POST`) in `server.ts`, and wired `GEMINI.md` + `MEMORY.md` loading into `POST /api/agent/chat`.
 - Added `src/components/ProjectContextPanel.tsx` (view/edit workflow + prompt-injection & data-handling warning) and explicit `"Save to Project Memory"` action in `src/components/AgentChat.tsx`.
 - Added unit tests in `tests/projectContext.test.ts`.
+
+## Stage 5 — Shared Agent Progress Event Stream (SSE)
+- Added channel-agnostic `src/agent/progressStream.ts` (`AgentProgressStream`, `ProgressEvent`, `sanitizeCommandSummary`) emitting concise stages (`analyzing_request`, `calling_gemini`, `running_command`, `command_completed`, `command_failed`, `reviewing_changes`, `finished`, `error`) with secret/argument redaction and zero Telegram/Express coupling.
+- Added `onPhase` hook in `src/agent/agentService.ts`.
+- Added `POST /api/agent/chat/stream` SSE endpoint in `server.ts` sharing `executeProjectChatTurn` with `POST /api/agent/chat` (non-streaming clients remain compatible), keeping final assistant response separate from `progress` events and persisting results even if the client disconnects mid-stream.
+- Updated `src/App.tsx`, `src/components/AgentChat.tsx`, and `src/types.ts` to stream and render live progress stages.
+- Added unit tests in `tests/progressStream.test.ts` covering event ordering, secret redaction, and failed commands.

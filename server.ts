@@ -21,6 +21,10 @@ import {
   saveProjectContextFile,
 } from "./src/agent/projectContext.ts";
 import {
+  AgentProgressStream,
+  type ProgressEvent,
+} from "./src/agent/progressStream.ts";
+import {
   applySecurityHeaders,
   createApiAuthMiddleware,
   loadServerSecurityConfig,
@@ -815,109 +819,168 @@ app.post("/api/projects/:projectId/memory/append", async (req, res) => {
   }
 });
 
-// POST Agent Chat endpoint with Autonomous Function Calling Loop
+async function executeProjectChatTurn(
+  body: Record<string, unknown>,
+  onProgress?: (event: ProgressEvent) => void | Promise<void>
+) {
+  const {
+    message,
+    history,
+    model = DEFAULT_GEMINI_MODEL,
+    temperature = 0,
+    systemInstruction = DEFAULT_SYSTEM_INSTRUCTION,
+    maxTurns,
+    projectId,
+    sessionId,
+  } = body || {};
+
+  if (!message || typeof message !== "string") {
+    throw Object.assign(new Error("Message is required"), { statusCode: 400 });
+  }
+
+  const ctx = resolveProjectContext(projectId, sessionId);
+  if (!ctx.project) {
+    throw Object.assign(new Error(ctx.errorMessage || "Project not found"), {
+      statusCode: ctx.errorStatus || 404,
+    });
+  }
+
+  if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
+    throw Object.assign(new Error("GEMINI_API_KEY is not configured on the server."), {
+      statusCode: 503,
+    });
+  }
+
+  const activeSession = ctx.session ?? sessionStore.ensureDefaultSession(ctx.project.id);
+  const persistedDetails = sessionStore.getSessionDetails(activeSession.id, ctx.project.id);
+  const effectiveHistory = Array.isArray(history)
+    ? history
+    : (persistedDetails?.messages || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+  sessionStore.appendMessage({
+    sessionId: activeSession.id,
+    projectId: ctx.project.id,
+    role: "user",
+    content: message,
+  });
+
+  const projectSandbox = projectStore.buildSandboxConfigForProject(sandboxConfig, ctx.project.id);
+  const projectCtx = await loadProjectInstructionsAndMemory(ctx.project.workspacePath);
+  const baseSystemInstruction =
+    typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION;
+  const effectiveSystemInstruction = buildProjectSystemInstruction({
+    baseInstruction: baseSystemInstruction,
+    projectName: ctx.project.name,
+    geminiMd: projectCtx.geminiMd,
+    memoryMd: projectCtx.memoryMd,
+  });
+
+  const progressStream = new AgentProgressStream();
+  if (onProgress) {
+    progressStream.subscribe(onProgress);
+  }
+
+  const result = await runGeminiAgent({
+    message,
+    history: effectiveHistory,
+    model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
+    temperature: typeof temperature === "number" ? temperature : 0,
+    systemInstruction: effectiveSystemInstruction,
+    maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
+    protectContextFiles: true,
+    sandboxConfig: projectSandbox,
+    onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
+    onEvent: (event) => progressStream.handleAgentEvent(event),
+  });
+
+  sessionStore.appendMessage({
+    sessionId: activeSession.id,
+    projectId: ctx.project.id,
+    role: "assistant",
+    content: result.text,
+    executionSteps: result.executionSteps,
+  });
+  sessionStore.appendExecutionEvents(activeSession.id, ctx.project.id, result.events);
+  projectStore.touchProject(ctx.project.id);
+
+  const updatedFiles = await getWorkspaceFilesTree(ctx.project.workspacePath);
+
+  return {
+    text: result.text,
+    executionSteps: result.executionSteps,
+    events: result.events,
+    progressEvents: progressStream.getEvents(),
+    turns: result.turns,
+    maxTurnsReached: result.maxTurnsReached,
+    files: updatedFiles,
+    projectId: ctx.project.id,
+    sessionId: activeSession.id,
+  };
+}
+
+// POST Agent Chat endpoint (non-streaming JSON compatibility)
 app.post("/api/agent/chat", async (req, res) => {
   try {
-    const {
-      message,
-      history,
-      model = DEFAULT_GEMINI_MODEL,
-      temperature = 0,
-      systemInstruction = DEFAULT_SYSTEM_INSTRUCTION,
-      maxTurns,
-      projectId,
-      sessionId,
-    } = req.body || {};
-
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "Message is required" });
-    }
-
-    const ctx = resolveProjectContext(projectId, sessionId);
-    if (!ctx.project) {
-      return res.status(ctx.errorStatus || 404).json({ error: ctx.errorMessage });
-    }
-
-    if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
-      return res.status(503).json({
-        error: "GEMINI_API_KEY is not configured on the server.",
-      });
-    }
-
-    const activeSession =
-      ctx.session ?? sessionStore.ensureDefaultSession(ctx.project.id);
-
-    const persistedDetails = sessionStore.getSessionDetails(
-      activeSession.id,
-      ctx.project.id
-    );
-    const effectiveHistory = Array.isArray(history)
-      ? history
-      : (persistedDetails?.messages || []).map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
-
-    sessionStore.appendMessage({
-      sessionId: activeSession.id,
-      projectId: ctx.project.id,
-      role: "user",
-      content: message,
-    });
-
-    const projectSandbox = projectStore.buildSandboxConfigForProject(
-      sandboxConfig,
-      ctx.project.id
-    );
-    const projectCtx = await loadProjectInstructionsAndMemory(ctx.project.workspacePath);
-    const baseSystemInstruction =
-      typeof systemInstruction === "string" ? systemInstruction : DEFAULT_SYSTEM_INSTRUCTION;
-    const effectiveSystemInstruction = buildProjectSystemInstruction({
-      baseInstruction: baseSystemInstruction,
-      projectName: ctx.project.name,
-      geminiMd: projectCtx.geminiMd,
-      memoryMd: projectCtx.memoryMd,
-    });
-
-    const result = await runGeminiAgent({
-      message,
-      history: effectiveHistory,
-      model: typeof model === "string" ? model : DEFAULT_GEMINI_MODEL,
-      temperature: typeof temperature === "number" ? temperature : 0,
-      systemInstruction: effectiveSystemInstruction,
-      maxTurns: typeof maxTurns === "number" ? maxTurns : undefined,
-      protectContextFiles: true,
-      sandboxConfig: projectSandbox,
-    });
-
-    sessionStore.appendMessage({
-      sessionId: activeSession.id,
-      projectId: ctx.project.id,
-      role: "assistant",
-      content: result.text,
-      executionSteps: result.executionSteps,
-    });
-    sessionStore.appendExecutionEvents(activeSession.id, ctx.project.id, result.events);
-    projectStore.touchProject(ctx.project.id);
-
-    // Get updated workspace files to send back to UI
-    const updatedFiles = await getWorkspaceFilesTree(ctx.project.workspacePath);
-
-    res.json({
-      text: result.text,
-      executionSteps: result.executionSteps,
-      events: result.events,
-      turns: result.turns,
-      maxTurnsReached: result.maxTurnsReached,
-      files: updatedFiles,
-      projectId: ctx.project.id,
-      sessionId: activeSession.id,
-    });
+    const payload = await executeProjectChatTurn((req.body || {}) as Record<string, unknown>);
+    res.json(payload);
   } catch (error: any) {
-    console.error("Agent chat error:", error);
-    res.status(500).json({
+    const status = typeof error?.statusCode === "number" ? error.statusCode : 500;
+    if (status >= 500) {
+      console.error("Agent chat error:", error);
+    }
+    res.status(status).json({
       error: error.message || "Internal server error during agent execution.",
     });
+  }
+});
+
+// POST Agent Chat SSE Stream endpoint
+app.post("/api/agent/chat/stream", async (req, res) => {
+  const body = (req.body || {}) as Record<string, unknown>;
+  if (!body.message || typeof body.message !== "string") {
+    return res.status(400).json({ error: "Message is required" });
+  }
+  const preCheck = resolveProjectContext(body.projectId, body.sessionId);
+  if (!preCheck.project) {
+    return res.status(preCheck.errorStatus || 404).json({ error: preCheck.errorMessage });
+  }
+  if (!isConfiguredGeminiApiKey(process.env.GEMINI_API_KEY)) {
+    return res.status(503).json({
+      error: "GEMINI_API_KEY is not configured on the server.",
+    });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  let disconnected = false;
+  req.on("close", () => {
+    disconnected = true;
+  });
+
+  const writeSse = (eventName: string, data: unknown) => {
+    if (disconnected || res.writableEnded || res.destroyed) return;
+    res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    const payload = await executeProjectChatTurn(body, (progressEvent) => {
+      writeSse("progress", progressEvent);
+    });
+    writeSse("result", payload);
+  } catch (error: any) {
+    writeSse("error", {
+      error: error?.message || "Internal server error during agent execution.",
+    });
+  } finally {
+    if (!disconnected && !res.writableEnded && !res.destroyed) {
+      res.end();
+    }
   }
 });
 

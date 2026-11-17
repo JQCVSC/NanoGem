@@ -16,13 +16,14 @@ import {
   Zap,
   BookmarkPlus,
 } from "lucide-react";
-import { ChatMessage, ExecutionStep } from "../types";
+import { AgentProgressEvent, ChatMessage, ExecutionStep } from "../types";
 
 interface AgentChatProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
   onSaveToMemory?: (text: string) => Promise<void>;
   isExecuting: boolean;
+  progressEvents?: AgentProgressEvent[];
   onSelectTab: (tab: "files" | "terminal") => void;
 }
 
@@ -38,6 +39,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   onSendMessage,
   onSaveToMemory,
   isExecuting,
+  progressEvents = [],
   onSelectTab,
 }) => {
   const [input, setInput] = useState("");
@@ -183,11 +185,40 @@ export const AgentChat: React.FC<AgentChatProps> = ({
           ))
         )}
 
-        {/* Loading Indicator */}
+        {/* Live Progress Timeline */}
         {isExecuting && (
-          <div className="max-w-4xl mx-auto ml-9 flex items-center space-x-3 bg-slate-900/90 border border-emerald-500/30 p-4 rounded-xl text-emerald-400 font-mono text-xs">
-            <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-            <span>NanoGemini is processing thoughts and running sandbox tools...</span>
+          <div className="max-w-4xl mx-auto ml-9 bg-slate-900/90 border border-emerald-500/30 p-4 rounded-xl font-mono text-xs space-y-2">
+            <div className="flex items-center space-x-2 text-emerald-400 font-bold">
+              <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+              <span>
+                {progressEvents.length > 0
+                  ? progressEvents[progressEvents.length - 1].label
+                  : "Analyzing request"}
+              </span>
+            </div>
+            {progressEvents.length > 0 && (
+              <ul className="space-y-1 pl-6 text-[11px] text-slate-300">
+                {progressEvents.map((ev) => (
+                  <li key={ev.id} className="flex items-center gap-2">
+                    <span
+                      className={
+                        ev.stage === "command_failed" || ev.stage === "error"
+                          ? "text-rose-400"
+                          : ev.stage === "finished" || ev.stage === "command_completed"
+                            ? "text-emerald-400"
+                            : "text-amber-400"
+                      }
+                    >
+                      •
+                    </span>
+                    <span className="font-semibold">{ev.label}</span>
+                    {ev.detail && (
+                      <code className="text-slate-400 truncate max-w-md">{ev.detail}</code>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
