@@ -9,8 +9,8 @@
   html,
   body {
     overflow-x: hidden;
-    background-color: #050811;
-    color: #cbd5e1;
+    background-color: #060914;
+    color: #e2e8f0;
   }
 
   button:not(:disabled),
@@ -23,22 +23,46 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* NanoGem prismatic accent signature derived from the NanoGem logo spectrum */
+.nanogem-prism-line {
+  background: linear-gradient(
+    90deg,
+    #f05050 0%,
+    #f59e0b 26%,
+    #4ade80 52%,
+    #38bdf8 76%,
+    #a855f7 100%
+  );
+}
+
+.nanogem-wordmark-gradient {
+  background: linear-gradient(90deg, #fbbf24 0%, #4ade80 35%, #38bdf8 68%, #c084fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.nanogem-logo-glow {
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.28))
+    drop-shadow(0 0 10px rgba(168, 85, 247, 0.22));
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #080d1a;
+  background: #080c1a;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1b253b;
+  background: #222e52;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2b3a58;
+  background: #34477a;
 }
 
 @media (prefers-reduced-motion: reduce) {

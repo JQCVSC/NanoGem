@@ -46,10 +46,10 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
     : "none";
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-[#060914] text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         {/* Top Banner */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+        <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-100">
               NanoGem Readiness &amp; Security Posture
@@ -62,7 +62,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
             <button
               type="button"
               onClick={onOpenNewProject}
-              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-sky-400 hover:bg-sky-300 text-[#060914] font-bold rounded-lg text-xs flex items-center gap-1.5"
             >
               <FolderPlus className="w-3.5 h-3.5" />
               <span>Create / Import Project</span>
@@ -70,7 +70,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
             <button
               type="button"
               onClick={onRefreshStatus}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 border border-[#24325c] rounded-lg text-xs flex items-center gap-1.5"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Re-check</span>
@@ -81,22 +81,22 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
         {/* Status Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
           {/* Container Runtime & Sandbox Readiness */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-slate-100">
-                <Container className="w-4 h-4 text-emerald-400" />
+                <Container className="w-4 h-4 text-sky-400" />
                 <span>Container Sandbox Runtime</span>
               </div>
               {isHostMode ? (
-                <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold">
                   Host Mode (Unsafe Opt-In)
                 </span>
               ) : sandboxReady ? (
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
                   {selectedRuntimeLabel === "podman" ? "Podman Ready" : "Docker Ready"}
                 </span>
               ) : (
-                <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/40 font-bold">
                   {runtimeAvailable ? "Sandbox Image Missing" : "Runtime Unavailable"}
                 </span>
               )}
@@ -114,7 +114,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
             ) : (
               <div className="space-y-2 text-slate-300 text-[11px]">
                 <p>
-                  Execution Mode: <code className="text-emerald-300">{runtimeStatus?.executionMode || "docker"}</code> | Configured Runtime:{" "}
+                  Execution Mode: <code className="text-sky-300">{runtimeStatus?.executionMode || "docker"}</code> | Configured Runtime:{" "}
                   <code>{runtimeInfo?.configuredRuntime || "auto"}</code>
                 </p>
                 <p>
@@ -125,7 +125,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
                   ({runtimeAvailable ? `Available${runtimeInfo?.serverVersion ? ` v${runtimeInfo.serverVersion}` : ""}` : "Unavailable"})
                 </p>
                 <p>
-                  Configured Image: <code className="text-emerald-300 break-all">{configuredImage}</code>
+                  Configured Image: <code className="text-sky-300 break-all">{configuredImage}</code>
                 </p>
                 <p>
                   User: <code>{runtimeInfo?.user || "1000:1000"}</code> | Read-only rootfs:{" "}
@@ -150,7 +150,7 @@ export const SetupStatusPanel: React.FC<SetupStatusPanelProps> = ({
                     <p className="font-bold">Remediation Required (Fail-Closed — No Host Fallback):</p>
                     <p>{runtimeInfo?.error || "Neither Docker nor Podman is available."}</p>
                     {runtimeInfo?.remediation && <p className="text-amber-200">{runtimeInfo.remediation}</p>}
-                    <pre className="bg-slate-950 p-2 rounded text-[11px] overflow-x-auto text-emerald-300">
+                    <pre className="bg-[#080c1a] p-2 rounded text-[11px] overflow-x-auto text-sky-300">
 {`# Option A (Docker Desktop on Windows):
 winget install -e --id Docker.DockerDesktop
 docker pull ${configuredImage}
@@ -167,18 +167,18 @@ podman pull ${configuredImage}`}
           </div>
 
           {/* Gemini Key Guidance (never displays secret value) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-slate-100">
-                <KeyRound className="w-4 h-4 text-emerald-400" />
+                <KeyRound className="w-4 h-4 text-amber-400" />
                 <span>Gemini API Configuration</span>
               </div>
               {apiKeyConfigured ? (
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 font-bold">
                   Configured (Hidden)
                 </span>
               ) : (
-                <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/40 font-bold">
                   Missing Key
                 </span>
               )}
@@ -187,9 +187,9 @@ podman pull ${configuredImage}`}
               <code>GEMINI_API_KEY</code> is kept strictly on the host server and is never displayed in the UI or passed into the sandbox container. Prompts and loaded context are sent to the Google Gemini API.
             </p>
             {!apiKeyConfigured && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-1 text-[11px]">
+              <div className="bg-[#080c1a] border border-[#1b2544] rounded-lg p-3 space-y-1 text-[11px]">
                 <p className="text-amber-300 font-bold">Configure in .env and restart NanoGem:</p>
-                <pre className="text-emerald-300 overflow-x-auto">
+                <pre className="text-sky-300 overflow-x-auto">
 {`cp .env.example .env
 # Set GEMINI_API_KEY="your-real-key" in .env
 npm run build && npm start`}
@@ -199,9 +199,9 @@ npm run build && npm start`}
           </div>
 
           {/* Active Project Context & Git State */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3">
             <div className="flex items-center gap-2 font-bold text-slate-100">
-              <BookOpen className="w-4 h-4 text-emerald-400" />
+              <BookOpen className="w-4 h-4 text-violet-400" />
               <span>Active Project: {projectName}</span>
             </div>
             <div className="space-y-1.5 text-[11px]">
@@ -238,34 +238,34 @@ npm run build && npm start`}
               <button
                 type="button"
                 onClick={() => onSelectTab("context")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
+                className="px-2.5 py-1 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded border border-[#24325c] flex items-center gap-1"
               >
-                <BookOpen className="w-3 h-3 text-emerald-400" />
+                <BookOpen className="w-3 h-3 text-sky-400" />
                 <span>Edit Instructions &amp; Memory</span>
               </button>
               <button
                 type="button"
                 onClick={() => onSelectTab("git")}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 flex items-center gap-1"
+                className="px-2.5 py-1 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded border border-[#24325c] flex items-center gap-1"
               >
-                <FileDiff className="w-3 h-3 text-emerald-400" />
+                <FileDiff className="w-3 h-3 text-violet-400" />
                 <span>Review Git Changes</span>
               </button>
             </div>
           </div>
 
           {/* Telegram Setup Guide */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-slate-100">
-                <Bot className="w-4 h-4 text-emerald-400" />
+                <Bot className="w-4 h-4 text-sky-400" />
                 <span>Telegram Channel Adapter</span>
               </div>
               <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                   runtimeStatus?.telegram?.configured
                     ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                    : "bg-slate-800 text-slate-400"
+                    : "bg-[#152042] text-slate-400"
                 }`}
               >
                 {runtimeStatus?.telegram?.configured ? "Polling Enabled" : "Not Configured"}
@@ -274,7 +274,7 @@ npm run build && npm start`}
             <p className="text-[11px] text-slate-300 leading-relaxed">
               Telegram runs host-side via long polling and maps each chat to its own isolated project/session (separate from the browser workspace). Set these in <code>.env</code>:
             </p>
-            <pre className="bg-slate-950 border border-slate-800 rounded p-2.5 text-[11px] text-emerald-300 overflow-x-auto">
+            <pre className="bg-[#080c1a] border border-[#1b2544] rounded p-2.5 text-[11px] text-sky-300 overflow-x-auto">
 {`TELEGRAM_BOT_TOKEN="123456:..."
 TELEGRAM_ALLOWED_USER_IDS="your_numeric_telegram_user_id"
 TELEGRAM_REQUIRE_MENTION="true"
@@ -284,7 +284,7 @@ TELEGRAM_POLLING="true"`}
         </div>
 
         {/* Security Documentation Links */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="text-slate-300">
             Review the threat model, container isolation controls, and deployment checklist before exposing NanoGem beyond <code>127.0.0.1</code>.
           </div>
@@ -293,7 +293,7 @@ TELEGRAM_POLLING="true"`}
               href="https://github.com/JQCVSC/NanoGem/blob/main/SECURITY.md"
               target="_blank"
               rel="noreferrer"
-              className="text-emerald-400 hover:underline flex items-center gap-1"
+              className="text-sky-400 hover:underline flex items-center gap-1"
             >
               <span>SECURITY.md</span>
               <ExternalLink className="w-3 h-3" />
@@ -302,7 +302,7 @@ TELEGRAM_POLLING="true"`}
               href="https://github.com/JQCVSC/NanoGem/blob/main/README.md"
               target="_blank"
               rel="noreferrer"
-              className="text-emerald-400 hover:underline flex items-center gap-1"
+              className="text-sky-400 hover:underline flex items-center gap-1"
             >
               <span>README.md</span>
               <ExternalLink className="w-3 h-3" />

@@ -46,12 +46,13 @@ Always think step-by-step. Use your tools immediately when needed without asking
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-xl w-full space-y-5 shadow-2xl">
+    <div className="fixed inset-0 bg-[#060914]/85 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+      <div className="bg-[#0b1022] border border-[#222e52] rounded-2xl p-6 max-w-xl w-full space-y-5 shadow-2xl relative overflow-hidden">
+        <div className="nanogem-prism-line h-[2px] w-full absolute top-0 left-0 opacity-85" aria-hidden="true" />
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="flex items-center justify-between border-b border-[#1b2544] pb-3">
           <div className="flex items-center space-x-2">
-            <Settings className="w-5 h-5 text-emerald-400" />
+            <Settings className="w-5 h-5 text-sky-400" />
             <h2 className="text-sm font-bold text-slate-100">NanoGem Sandbox Config</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200">
@@ -67,7 +68,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-[#080c1a] border border-[#1b2544] rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-sky-400"
             >
               <option value="gemini-3.6-flash">gemini-3.6-flash (Recommended: Ultra-fast agent speed)</option>
               <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Advanced reasoning & code logic)</option>
@@ -87,7 +88,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
               step="0.1"
               value={temperature}
               onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              className="w-full accent-emerald-500 cursor-pointer"
+              className="w-full accent-sky-400 cursor-pointer"
             />
           </div>
 
@@ -98,13 +99,13 @@ Always think step-by-step. Use your tools immediately when needed without asking
               rows={6}
               value={systemInstruction}
               onChange={(e) => setSystemInstruction(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-200 leading-relaxed focus:outline-none focus:border-emerald-500 resize-none"
+              className="w-full bg-[#080c1a] border border-[#1b2544] rounded-lg p-3 text-slate-200 leading-relaxed focus:outline-none focus:border-sky-400 resize-none"
             />
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+        <div className="flex items-center justify-between pt-3 border-t border-[#1b2544]">
           <button
             onClick={handleResetDefault}
             className="text-slate-400 hover:text-slate-200 flex items-center gap-1 text-xs"
@@ -116,13 +117,13 @@ Always think step-by-step. Use your tools immediately when needed without asking
           <div className="flex space-x-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+              className="px-3 py-1.5 bg-[#152042] text-slate-300 hover:bg-[#1d2b57] rounded-lg text-xs"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1"
+              className="px-4 py-1.5 bg-sky-400 hover:bg-sky-300 text-[#060914] font-bold rounded-lg text-xs flex items-center gap-1"
             >
               <Check className="w-3.5 h-3.5" />
               <span>Save Configuration</span>

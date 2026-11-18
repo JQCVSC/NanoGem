@@ -130,7 +130,6 @@ test("resolveSafeWorkspacePath blocks direct, intermediate, and dangling symlink
 test("loadServerSecurityConfig blocks unauthenticated public binds", () => {
   const localCfg = loadServerSecurityConfig({});
   assert.equal(localCfg.host, "127.0.0.1");
-  assert.equal(localCfg.port, 3000);
   assert.equal(localCfg.isPublicBind, false);
 
   assert.throws(

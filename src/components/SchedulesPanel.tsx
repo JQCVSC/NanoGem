@@ -103,11 +103,11 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-[#060914] text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Clock className="w-5 h-5 text-emerald-400" />
+            <Clock className="w-5 h-5 text-sky-400" />
             <div>
               <h2 className="text-sm font-bold text-slate-100">
                 Scheduled Tasks &mdash; {projectName}
@@ -127,7 +127,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
             type="button"
             onClick={loadSchedules}
             disabled={isLoading}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs border border-slate-700 flex items-center gap-1.5"
+            className="px-3 py-1.5 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded-lg text-xs border border-[#24325c] flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
             <span>Refresh</span>
@@ -151,10 +151,10 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
         {/* Create Schedule Form */}
         <form
           onSubmit={handleCreate}
-          className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 text-xs"
+          className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3 text-xs"
         >
           <h3 className="font-bold text-slate-200 flex items-center gap-1.5">
-            <Plus className="w-4 h-4 text-emerald-400" />
+            <Plus className="w-4 h-4 text-sky-400" />
             Add Opt-In Schedule for &ldquo;{projectName}&rdquo;
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -163,12 +163,12 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Task name (e.g. Nightly Tests)"
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+              className="bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-sky-400"
             />
             <select
               value={taskKind}
               onChange={(e) => setTaskKind(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+              className="bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-sky-400"
             >
               <option value="test_run">Recurring Test Run</option>
               <option value="repo_status">Repository Status Check</option>
@@ -179,14 +179,14 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
               value={scheduleExpr}
               onChange={(e) => setScheduleExpr(e.target.value)}
               placeholder="15m or */15 * * * *"
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+              className="bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-sky-400"
             />
             <input
               type="text"
               value={notifyChatId}
               onChange={(e) => setNotifyChatId(e.target.value)}
               placeholder="Telegram Chat ID (optional)"
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+              className="bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-sky-400"
             />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -195,14 +195,14 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
                 type="checkbox"
                 checked={enableImmediately}
                 onChange={(e) => setEnableImmediately(e.target.checked)}
-                className="accent-emerald-500"
+                className="accent-sky-400"
               />
               <span>Enable task immediately</span>
             </label>
             <button
               type="submit"
               disabled={!name.trim()}
-              className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold rounded-lg"
+              className="px-4 py-1.5 bg-sky-400 hover:bg-sky-300 disabled:bg-[#141d38] disabled:text-slate-500 text-[#060914] font-bold rounded-lg"
             >
               Create Schedule
             </button>
@@ -210,7 +210,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
         </form>
 
         {/* Task List */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
+        <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-3 text-xs">
           <h3 className="font-bold text-slate-200">Configured Tasks ({tasks.length})</h3>
           {tasks.length === 0 ? (
             <p className="text-slate-500">No scheduled tasks configured for this project.</p>
@@ -219,22 +219,22 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
               {tasks.map((t) => (
                 <div
                   key={t.id}
-                  className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3"
+                  className="bg-[#080c1a] border border-[#1b2544] rounded-lg p-3 flex flex-wrap items-center justify-between gap-3"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-slate-100">{t.name}</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">
+                      <span className="px-2 py-0.5 rounded bg-[#152042] text-slate-300 text-[10px]">
                         {t.taskKind}
                       </span>
-                      <code className="text-emerald-400">{t.scheduleExpr}</code>
+                      <code className="text-sky-400">{t.scheduleExpr}</code>
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           t.lastStatus === "succeeded"
                             ? "bg-emerald-500/20 text-emerald-300"
                             : t.lastStatus === "failed"
                               ? "bg-rose-500/20 text-rose-300"
-                              : "bg-slate-800 text-slate-300"
+                              : "bg-[#152042] text-slate-300"
                         }`}
                       >
                         {t.lastStatus}
@@ -246,7 +246,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => handleAction(t.id, "run-now")}
-                      className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded flex items-center gap-1"
+                      className="px-2.5 py-1 bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-400/40 rounded flex items-center gap-1"
                     >
                       <Play className="w-3 h-3" /> Run Now
                     </button>
@@ -254,7 +254,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => handleAction(t.id, "pause")}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1"
+                        className="px-2.5 py-1 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded flex items-center gap-1"
                       >
                         <Pause className="w-3 h-3" /> Pause
                       </button>
@@ -262,7 +262,7 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
                       <button
                         type="button"
                         onClick={() => handleAction(t.id, "resume")}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1"
+                        className="px-2.5 py-1 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded flex items-center gap-1"
                       >
                         <Play className="w-3 h-3" /> Resume
                       </button>
@@ -284,13 +284,13 @@ export const SchedulesPanel: React.FC<SchedulesPanelProps> = ({
 
         {/* Recent Runs */}
         {runs.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-2 text-xs">
             <h3 className="font-bold text-slate-200">Recent Scheduled Runs</h3>
             <div className="space-y-2">
               {runs.map((r) => (
                 <div
                   key={r.id}
-                  className="bg-slate-950 border border-slate-800 rounded p-2.5 space-y-1"
+                  className="bg-[#080c1a] border border-[#1b2544] rounded p-2.5 space-y-1"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-slate-200">

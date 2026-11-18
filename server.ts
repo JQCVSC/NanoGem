@@ -77,8 +77,59 @@ const DB_PATH = path.resolve(
   process.env.NANOGEM_DB_PATH?.trim() || path.join(process.cwd(), ".nanogem", "nanogem.db")
 );
 
+function parseCliPortArg(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--port" || arg === "-p") {
+      const next = argv[i + 1];
+      if (next && /^\d+$/.test(next)) {
+        return next;
+      }
+    } else if (arg.startsWith("--port=")) {
+      const value = arg.slice("--port=".length).trim();
+      if (/^\d+$/.test(value)) {
+        return value;
+      }
+    }
+  }
+  return undefined;
+}
+
+function resolveServerSecurityConfig() {
+  if (process.env.NODE_ENV === "production") {
+    return loadServerSecurityConfig();
+  }
+
+  const cliPort = parseCliPortArg(process.argv.slice(2));
+  const npmConfigPort = process.env.npm_config_port?.trim();
+  const explicitDevPort =
+    cliPort ||
+    process.env.NANOGEM_PORT?.trim() ||
+    (npmConfigPort && /^\d+$/.test(npmConfigPort) ? npmConfigPort : undefined);
+
+  const defaultPreviewPort =
+    process.env.K_SERVICE && process.env.PORT?.trim() === "8080"
+      ? "3000"
+      : process.env.PORT?.trim() || "3000";
+
+  const devEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    PORT: explicitDevPort || defaultPreviewPort,
+  };
+
+  if (
+    !process.env.NANOGEM_HOST?.trim() &&
+    !process.env.NANOGEM_API_TOKEN?.trim() &&
+    !process.env.NANOGEM_AUTH_TOKEN?.trim()
+  ) {
+    devEnv.HOST = "127.0.0.1";
+  }
+
+  return loadServerSecurityConfig(devEnv);
+}
+
 const sandboxConfig = loadSandboxConfig(WORKSPACE_DIR);
-const securityConfig = loadServerSecurityConfig();
+const securityConfig = resolveServerSecurityConfig();
 const agentProvider = resolveAgentProvider();
 const telegramConfig = loadTelegramConfig();
 const db = openNanoGemDatabase(DB_PATH);
@@ -1373,7 +1424,10 @@ export async function startServer() {
 
   if (isDev) {
     vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ...(process.env.K_SERVICE ? { allowedHosts: true as const } : {}),
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

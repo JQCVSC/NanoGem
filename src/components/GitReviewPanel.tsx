@@ -129,12 +129,12 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-[#060914] text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         {/* Header Bar */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <FileDiff className="w-5 h-5 text-emerald-400" />
+            <FileDiff className="w-5 h-5 text-sky-400" />
             <div>
               <h2 className="text-sm font-bold text-slate-100">
                 Git Review &amp; Revert &mdash; {projectName}
@@ -149,7 +149,7 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
             type="button"
             onClick={loadGitData}
             disabled={isLoading}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs border border-slate-700 flex items-center gap-1.5"
+            className="px-3 py-1.5 bg-[#152042] hover:bg-[#1d2b57] text-slate-200 rounded-lg text-xs border border-[#24325c] flex items-center gap-1.5"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
             <span>Refresh Diff</span>
@@ -171,7 +171,7 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
         )}
 
         {status && !status.isGitRepo ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-xs text-slate-300 space-y-2">
+          <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-6 text-xs text-slate-300 space-y-2">
             <p className="font-bold text-slate-100">Not a Git Repository</p>
             <p className="text-slate-400">
               This project workspace does not contain an isolated <code>.git</code> directory.
@@ -184,10 +184,10 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
             <>
               {/* Status & Actions */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+                <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Current Branch</span>
-                    <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-full flex items-center gap-1">
+                    <span className="px-2 py-0.5 bg-sky-500/15 border border-sky-400/35 text-sky-300 rounded-md flex items-center gap-1">
                       <GitBranch className="w-3 h-3" />
                       {status.branch || "HEAD"}
                     </span>
@@ -211,7 +211,7 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
                 {/* Create Branch */}
                 <form
                   onSubmit={handleCreateBranch}
-                  className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs"
+                  className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-2.5 text-xs"
                 >
                   <label className="block font-bold text-slate-200">Create Branch</label>
                   <div className="flex gap-2">
@@ -220,12 +220,12 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
                       value={branchInput}
                       onChange={(e) => setBranchInput(e.target.value)}
                       placeholder="feature/my-change"
-                      className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-emerald-500"
+                      className="flex-1 bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-sky-400"
                     />
                     <button
                       type="submit"
                       disabled={!branchInput.trim()}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 rounded-lg border border-slate-700 font-bold"
+                      className="px-3 py-1.5 bg-[#152042] hover:bg-[#1d2b57] disabled:opacity-50 text-slate-100 rounded-lg border border-[#24325c] font-bold"
                     >
                       Branch
                     </button>
@@ -233,7 +233,7 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
                 </form>
 
                 {/* Commit & Reset/Revert */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2.5 text-xs">
+                <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-2.5 text-xs">
                   <label className="block font-bold text-slate-200">
                     Commit or Reset/Revert
                   </label>
@@ -243,13 +243,13 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
                       value={commitMessage}
                       onChange={(e) => setCommitMessage(e.target.value)}
                       placeholder="Commit message..."
-                      className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-emerald-500"
+                      className="flex-1 bg-[#080c1a] border border-[#1b2544] rounded-lg px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-sky-400"
                     />
                     <button
                       type="button"
                       disabled={status.clean || !commitMessage.trim()}
                       onClick={() => setConfirmModal("commit")}
-                      className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold rounded-lg flex items-center gap-1"
+                      className="px-3 py-1.5 bg-sky-400 hover:bg-sky-300 disabled:bg-[#141d38] disabled:text-slate-500 text-[#060914] font-bold rounded-lg flex items-center gap-1"
                     >
                       <GitCommit className="w-3.5 h-3.5" />
                       <span>Commit</span>
@@ -269,16 +269,16 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
 
               {/* Changed Files List */}
               {status.entries.length > 0 && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+                <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl p-4 space-y-2 text-xs">
                   <h3 className="font-bold text-slate-200">Changed Files</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {status.entries.map((entry) => (
                       <div
                         key={entry.path}
-                        className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5"
+                        className="flex items-center justify-between bg-[#080c1a] border border-[#1b2544] rounded px-2.5 py-1.5"
                       >
                         <code className="text-slate-200 truncate">{entry.path}</code>
-                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-[#152042] text-amber-300">
                           {entry.label}
                         </span>
                       </div>
@@ -288,14 +288,14 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
               )}
 
               {/* Diff Viewer */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden text-xs">
-                <div className="px-4 py-2.5 border-b border-slate-800 flex items-center justify-between">
+              <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl overflow-hidden text-xs">
+                <div className="px-4 py-2.5 border-b border-[#1b2544] flex items-center justify-between">
                   <span className="font-bold text-slate-200">Workspace Diff</span>
                   {diffInfo?.truncated && (
                     <span className="text-amber-400">Diff truncated at 256 KiB</span>
                   )}
                 </div>
-                <pre className="p-4 bg-slate-950 text-slate-200 overflow-x-auto max-h-[420px] whitespace-pre-wrap leading-relaxed">
+                <pre className="p-4 bg-[#080c1a] text-slate-200 overflow-x-auto max-h-[420px] whitespace-pre-wrap leading-relaxed">
                   {diffInfo?.diff
                     ? diffInfo.diff
                     : diffInfo?.untrackedFiles?.length
@@ -310,8 +310,8 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
 
       {/* Explicit Confirmation Modal */}
       {confirmModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+        <div className="fixed inset-0 bg-[#060914]/85 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-mono">
+          <div className="bg-[#0b1022] border border-[#222e52] rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
             <div className="flex items-center gap-2 text-amber-400">
               <AlertTriangle className="w-5 h-5" />
               <h3 className="text-sm font-bold text-slate-100">
@@ -329,7 +329,7 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmModal(null)}
-                className="px-3 py-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded-lg text-xs"
+                className="px-3 py-1.5 bg-[#152042] text-slate-300 hover:bg-[#1d2b57] rounded-lg text-xs"
               >
                 Cancel
               </button>
@@ -340,8 +340,8 @@ export const GitReviewPanel: React.FC<GitReviewPanelProps> = ({
                 }
                 className={`px-4 py-1.5 font-bold rounded-lg text-xs ${
                   confirmModal === "revert"
-                    ? "bg-rose-500 hover:bg-rose-400 text-slate-950"
-                    : "bg-emerald-500 hover:bg-emerald-400 text-slate-950"
+                    ? "bg-rose-500 hover:bg-rose-400 text-[#060914]"
+                    : "bg-sky-400 hover:bg-sky-300 text-[#060914]"
                 }`}
               >
                 {confirmModal === "revert" ? "Confirm Revert" : "Confirm Commit"}

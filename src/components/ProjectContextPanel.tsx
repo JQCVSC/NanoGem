@@ -79,7 +79,7 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
   const memoryBytes = new TextEncoder().encode(memoryMd).length;
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-950 text-slate-100 font-mono p-4 md:p-6">
+    <div className="h-full overflow-y-auto bg-[#060914] text-slate-100 font-mono p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         {/* Prompt Injection & Gemini Data-Handling Warning */}
         <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3 text-xs">
@@ -117,10 +117,10 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* GEMINI.md Editor */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+            <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#1b2544] flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-emerald-400" />
+                  <BookOpen className="w-4 h-4 text-sky-400" />
                   <div>
                     <h3 className="text-xs font-bold text-slate-100">GEMINI.md</h3>
                     <p className="text-[11px] text-slate-400">
@@ -144,10 +144,10 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
                 value={geminiMd}
                 onChange={(e) => setGeminiMd(e.target.value)}
                 placeholder="Write project-specific Gemini instructions here..."
-                className="w-full flex-1 p-4 bg-slate-950 text-slate-200 text-xs leading-relaxed focus:outline-none resize-none"
+                className="w-full flex-1 p-4 bg-[#080c1a] text-slate-200 text-xs leading-relaxed focus:outline-none resize-none"
               />
 
-              <div className="px-4 py-2.5 border-t border-slate-800 flex items-center justify-between">
+              <div className="px-4 py-2.5 border-t border-[#1b2544] flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setGeminiMd(defaultGeminiTemplate)}
@@ -159,7 +159,7 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSave("GEMINI.md", geminiMd)}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5"
+                  className="px-3 py-1.5 bg-sky-400 hover:bg-sky-300 text-[#060914] font-bold rounded-lg text-xs flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save GEMINI.md</span>
@@ -168,10 +168,10 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
             </div>
 
             {/* MEMORY.md Editor */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+            <div className="bg-[#0b1022] border border-[#1b2544] rounded-xl flex flex-col overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#1b2544] flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <BrainCircuit className="w-4 h-4 text-emerald-400" />
+                  <BrainCircuit className="w-4 h-4 text-violet-400" />
                   <div>
                     <h3 className="text-xs font-bold text-slate-100">MEMORY.md</h3>
                     <p className="text-[11px] text-slate-400">
@@ -195,10 +195,10 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
                 value={memoryMd}
                 onChange={(e) => setMemoryMd(e.target.value)}
                 placeholder="Curate durable architecture notes, conventions, and decisions here..."
-                className="w-full flex-1 p-4 bg-slate-950 text-slate-200 text-xs leading-relaxed focus:outline-none resize-none"
+                className="w-full flex-1 p-4 bg-[#080c1a] text-slate-200 text-xs leading-relaxed focus:outline-none resize-none"
               />
 
-              <div className="px-4 py-2.5 border-t border-slate-800 flex items-center justify-between">
+              <div className="px-4 py-2.5 border-t border-[#1b2544] flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setMemoryMd(defaultMemoryTemplate)}
@@ -210,7 +210,7 @@ export const ProjectContextPanel: React.FC<ProjectContextPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => handleSave("MEMORY.md", memoryMd)}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5"
+                  className="px-3 py-1.5 bg-sky-400 hover:bg-sky-300 text-[#060914] font-bold rounded-lg text-xs flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save MEMORY.md</span>
