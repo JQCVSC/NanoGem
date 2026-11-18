@@ -1,10 +1,10 @@
 {
-  "name": "react-example",
+  "name": "nanogem",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "HOST=127.0.0.1 PORT=3000 tsx server.ts",
+    "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
