@@ -25,6 +25,7 @@ import {
   ProjectSummary,
   RuntimeStatus,
 } from "../types";
+import { mapProgressStageToDiagnostic } from "../chat/streamClient";
 
 interface AgentChatProps {
   messages: ChatMessage[];
@@ -101,9 +102,11 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   const [pendingDestructivePrompt, setPendingDestructivePrompt] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const localSubmitGuardRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
 
   useEffect(() => {
     if (draftPrompt) {
@@ -113,9 +116,17 @@ export const AgentChat: React.FC<AgentChatProps> = ({
     }
   }, [draftPrompt, onConsumeDraftPrompt]);
 
+  const handleViewportScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldAutoScrollRef.current = distanceFromBottom <= 48;
+  };
+
   useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
     messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
-  }, [messages, isExecuting]);
+  }, [messages, progressEvents, isExecuting]);
 
   const runtimeInfo = runtimeStatus?.containerRuntime ?? runtimeStatus?.docker;
   const isHostMode = runtimeStatus?.executionMode === "host";
@@ -148,6 +159,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
     }
 
     localSubmitGuardRef.current = true;
+    shouldAutoScrollRef.current = true;
     setInput(trimmed);
     setPendingDestructivePrompt(null);
     try {
@@ -169,6 +181,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
     if (!pendingDestructivePrompt || isExecuting || localSubmitGuardRef.current) return;
     const confirmed = pendingDestructivePrompt;
     localSubmitGuardRef.current = true;
+    shouldAutoScrollRef.current = true;
     setInput(confirmed);
     setPendingDestructivePrompt(null);
     try {
@@ -184,6 +197,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   const handleRetryClick = async () => {
     if (!onRetry || isExecuting || localSubmitGuardRef.current) return;
     localSubmitGuardRef.current = true;
+    shouldAutoScrollRef.current = true;
     try {
       const succeeded = await onRetry();
       if (succeeded !== false) {
@@ -215,7 +229,12 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   return (
     <div className="flex flex-col h-full bg-[#050811] text-slate-300">
       {/* Main Scrollable Viewport (Empty State Card OR Conversation Thread) */}
-      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 flex flex-col">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleViewportScroll}
+        data-testid="chat-scroll-viewport"
+        className="flex-1 overflow-y-auto px-4 md:px-6 py-4 flex flex-col"
+      >
         {messages.length === 0 ? (
           <div className="m-auto w-full max-w-2xl bg-[#090d18] border border-[#161f36] rounded-2xl p-6 md:p-8 shadow-2xl flex flex-col items-center text-center">
             {/* Center Brand Mark */}
@@ -370,6 +389,23 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                   <span className="text-xs font-semibold text-slate-200">
                     {msg.role === "user" ? "You" : "NanoGem Agent"}
                   </span>
+                  {msg.role === "assistant" && msg.statusLabel && (
+                    <span
+                      data-testid="message-status-badge"
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono border ${
+                        msg.statusStage === "failed"
+                          ? "bg-rose-950/40 text-rose-300 border-rose-500/40"
+                          : msg.statusStage === "fallback"
+                            ? "bg-amber-950/40 text-amber-300 border-amber-500/40"
+                            : msg.statusStage === "completed"
+                              ? "bg-[#0b2420] text-emerald-400 border-emerald-500/30"
+                              : "bg-[#0c1424] text-emerald-300 border-emerald-500/30"
+                      }`}
+                    >
+                      {msg.isStreaming && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+                      <span>{msg.statusLabel}</span>
+                    </span>
+                  )}
                   {msg.role === "assistant" && msg.modelUsed && (
                     <span
                       data-testid="message-model-badge"
@@ -387,7 +423,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                   <span className="text-xs text-slate-500 tabular-nums font-mono">
                     {msg.timestamp}
                   </span>
-                  {msg.role === "assistant" && onSaveToMemory && msg.content && (
+                  {msg.role === "assistant" && onSaveToMemory && !msg.isStreaming && msg.content && (
                     <button
                       type="button"
                       onClick={async () => {
@@ -412,8 +448,27 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                 </div>
 
                 <div className="p-4 rounded-xl bg-[#090d18] border border-[#161f36] text-slate-200 ml-9 text-sm leading-relaxed">
+                  {msg.isStreaming && !msg.content && !msg.errorMessage && (
+                    <div className="flex items-center gap-2 text-xs font-mono text-emerald-300">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                      <span>{msg.statusLabel || "Analyzing request…"}</span>
+                      {msg.statusDetail && (
+                        <code className="text-slate-400 truncate max-w-md">{msg.statusDetail}</code>
+                      )}
+                    </div>
+                  )}
+
                   {msg.content && (
                     <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                  )}
+
+                  {msg.errorMessage && (
+                    <div
+                      data-testid="message-inline-error"
+                      className={`${msg.content ? "mt-3 " : ""}rounded-lg bg-rose-950/40 border border-rose-500/30 px-3 py-2 text-xs text-rose-200`}
+                    >
+                      {msg.errorMessage}
+                    </div>
                   )}
 
                   {msg.executionSteps && msg.executionSteps.length > 0 && (
@@ -447,13 +502,15 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                 <span>
                   {progressEvents.length > 0
-                    ? progressEvents[progressEvents.length - 1].label
+                    ? mapProgressStageToDiagnostic(progressEvents[progressEvents.length - 1].stage).label
                     : "Analyzing request"}
                 </span>
               </div>
               {progressEvents.length > 0 && (
                 <ul className="space-y-1 pl-6 text-xs text-slate-300">
-                  {progressEvents.map((ev) => (
+                  {progressEvents.map((ev) => {
+                    const diagnostic = mapProgressStageToDiagnostic(ev.stage);
+                    return (
                     <li key={ev.id} className="flex items-center gap-2">
                       <span
                         className={
@@ -466,14 +523,15 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                       >
                         •
                       </span>
-                      <span className="font-medium">{ev.label}</span>
+                      <span className="font-medium">{diagnostic.label}</span>
                       {ev.detail && (
                         <code className="font-mono text-slate-400 truncate max-w-md">
                           {ev.detail}
                         </code>
                       )}
                     </li>
-                  ))}
+                  );
+                  })}
                 </ul>
               )}
             </div>

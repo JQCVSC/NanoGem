@@ -23,6 +23,16 @@ import {
   AgentRequestError,
 } from "./types";
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
+import {
+  StreamFallbackEligibleError,
+  StreamProtocolError,
+  StreamServerError,
+  consumeChatStreamResponse,
+  isStreamingEndpointMissingStatus,
+  mapProgressStageToDiagnostic,
+  parseHttpErrorResponse,
+  type ChatCompletionPayload,
+} from "./chat/streamClient";
 
 export const INITIAL_APP_TAB: AppTab = "home";
 
@@ -35,6 +45,7 @@ export interface AppProps {
   initialSessions?: SessionSummary[];
   initialActiveSessionId?: string | null;
   skipInitialFetch?: boolean;
+  requestTimeoutMs?: number;
 }
 
 export default function App({
@@ -46,15 +57,19 @@ export default function App({
   initialSessions = [],
   initialActiveSessionId = null,
   skipInitialFetch = false,
+  requestTimeoutMs = 120000,
 }: AppProps = {}) {
   const [activeTab, setActiveTab] = useState<AppTab>(initialTab);
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const messagesRef = useRef<ChatMessage[]>(initialMessages);
+  messagesRef.current = messages;
   const [draftPrompt, setDraftPrompt] = useState<string | null>(null);
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [progressEvents, setProgressEvents] = useState<AgentProgressEvent[]>([]);
   const [lastRequestError, setLastRequestError] = useState<AgentRequestError | null>(null);
   const inFlightSubmitRef = useRef<boolean>(false);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
@@ -114,7 +129,11 @@ Always think step-by-step. Use your tools immediately when needed without asking
           }),
           executionSteps: m.executionSteps || [],
         }));
-        setMessages(restored);
+        setMessages((previous) =>
+          inFlightSubmitRef.current || previous.some((m) => m.isStreaming)
+            ? previous
+            : restored
+        );
       }
     } catch (err) {
       console.error("Failed to resume session:", err);
@@ -184,6 +203,13 @@ Always think step-by-step. Use your tools immediately when needed without asking
       console.error("Failed to load projects:", err);
     }
   }, [selectProject]);
+
+  useEffect(() => {
+    return () => {
+      activeAbortControllerRef.current?.abort();
+      activeAbortControllerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (skipInitialFetch) return;
@@ -261,144 +287,286 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
-  const handleSendMessage = async (text: string): Promise<boolean> => {
+  const updateAssistantMessage = useCallback(
+    (assistantMsgId: string, updater: (msg: ChatMessage) => ChatMessage) => {
+      setMessages((previous) =>
+        previous.map((msg) => (msg.id === assistantMsgId ? updater(msg) : msg))
+      );
+    },
+    []
+  );
+
+  const handleSendMessage = async (
+    text: string,
+    options: { replaceFailedTurn?: { userMsgId: string; assistantMsgId: string } } = {}
+  ): Promise<boolean> => {
     const trimmed = text.trim();
     if (!trimmed || inFlightSubmitRef.current || isExecuting) {
       return false;
     }
 
     inFlightSubmitRef.current = true;
-    const userMsgId = Math.random().toString(36).substring(2, 9);
+    const controller = new AbortController();
+    activeAbortControllerRef.current = controller;
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, requestTimeoutMs);
+
     const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const replaceTurn = options.replaceFailedTurn;
+    const userMsgId =
+      replaceTurn?.userMsgId || `user_${Math.random().toString(36).substring(2, 9)}`;
+    const assistantMsgId =
+      replaceTurn?.assistantMsgId || `asst_${Math.random().toString(36).substring(2, 9)}`;
 
-    const newUserMsg: ChatMessage = {
-      id: userMsgId,
-      role: "user",
-      content: trimmed,
-      timestamp: timeStr,
-    };
-
-    const previousMessages = [...messages];
-    setLastRequestError(null);
-    setMessages([...previousMessages, newUserMsg]);
-    setProgressEvents([]);
-    setIsExecuting(true);
-
-    try {
-      const history = previousMessages.map((m) => ({
+    // Build conversation history from completed prior messages without relying on stale snapshots later
+    const excludedIds = new Set(replaceTurn ? [replaceTurn.userMsgId, replaceTurn.assistantMsgId] : []);
+    const history = messagesRef.current
+      .filter((m) => !excludedIds.has(m.id) && !m.isStreaming && !m.errorMessage && m.content)
+      .map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      const res = await apiFetch("/api/agent/chat/stream", {
+    setLastRequestError(null);
+    setProgressEvents([]);
+    setIsExecuting(true);
+
+    if (replaceTurn) {
+      setMessages((previous) =>
+        previous.map((m) =>
+          m.id === assistantMsgId
+            ? {
+                ...m,
+                content: "",
+                executionSteps: [],
+                isStreaming: true,
+                statusStage: "analyzing_request",
+                statusLabel: "Analyzing request…",
+                statusDetail: undefined,
+                errorMessage: undefined,
+              }
+            : m
+        )
+      );
+    } else {
+      const newUserMsg: ChatMessage = {
+        id: userMsgId,
+        role: "user",
+        content: trimmed,
+        timestamp: timeStr,
+      };
+      const placeholderAssistantMsg: ChatMessage = {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        timestamp: timeStr,
+        executionSteps: [],
+        isStreaming: true,
+        statusStage: "analyzing_request",
+        statusLabel: "Analyzing request…",
+      };
+      setMessages((previous) => [...previous, newUserMsg, placeholderAssistantMsg]);
+    }
+
+    const requestBody = JSON.stringify({
+      message: trimmed,
+      history,
+      model: agentSettings.model,
+      temperature: agentSettings.temperature,
+      systemInstruction: agentSettings.systemInstruction,
+      projectId: activeProjectId,
+      sessionId: activeSessionId || undefined,
+    });
+
+    const executeJsonFallbackOnce = async (): Promise<ChatCompletionPayload> => {
+      updateAssistantMessage(assistantMsgId, (msg) => ({
+        ...msg,
+        statusStage: "fallback",
+        statusLabel: "Streaming unavailable — using standard JSON request…",
+      }));
+
+      const fallbackRes = await apiFetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: trimmed,
-          history,
-          model: agentSettings.model,
-          temperature: agentSettings.temperature,
-          systemInstruction: agentSettings.systemInstruction,
-          projectId: activeProjectId,
-          sessionId: activeSessionId || undefined,
-        }),
+        body: requestBody,
+        signal: controller.signal,
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw {
-          message: errData.error || "Failed to communicate with NanoGem Agent",
-          code: errData.code,
-          retryable: Boolean(errData.retryable),
-          status: typeof errData.status === "number" ? errData.status : res.status,
-        };
+      if (!fallbackRes.ok) {
+        throw await parseHttpErrorResponse(fallbackRes);
       }
+      return (await fallbackRes.json()) as ChatCompletionPayload;
+    };
 
-      const contentType = res.headers.get("content-type") || "";
-      let data: any = null;
+    try {
+      let data: ChatCompletionPayload;
 
-      if (contentType.includes("text/event-stream") && res.body) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+      try {
+        const res = await apiFetch("/api/agent/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: requestBody,
+          signal: controller.signal,
+        });
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const blocks = buffer.split("\n\n");
-          buffer = blocks.pop() || "";
-
-          for (const block of blocks) {
-            const lines = block.split(/\r?\n/);
-            let eventName = "message";
-            const dataLines: string[] = [];
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventName = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-              }
-            }
-            if (dataLines.length === 0) continue;
-            const parsed = JSON.parse(dataLines.join("\n"));
-            if (eventName === "progress") {
-              setProgressEvents((prev) => [...prev, parsed]);
-            } else if (eventName === "result") {
-              data = parsed;
-            } else if (eventName === "error") {
-              throw {
-                message: parsed.error || "Agent execution failed.",
-                code: parsed.code,
-                retryable: Boolean(parsed.retryable),
-                status: parsed.status,
-              };
-            }
+        if (!res.ok) {
+          if (isStreamingEndpointMissingStatus(res.status)) {
+            throw new StreamFallbackEligibleError(
+              `Streaming endpoint unavailable (HTTP ${res.status}).`
+            );
           }
+          throw await parseHttpErrorResponse(res);
         }
-      } else {
-        data = await res.json();
-      }
 
-      if (!data) {
-        throw new Error("Stream ended before returning a final response.");
+        data = await consumeChatStreamResponse(res, {
+          onProgress: (parsed) => {
+            setProgressEvents((previous) => [...previous, parsed]);
+            const diagnostic = mapProgressStageToDiagnostic(parsed.stage);
+            updateAssistantMessage(assistantMsgId, (msg) => ({
+              ...msg,
+              statusStage: diagnostic.stage,
+              statusLabel: diagnostic.label,
+              statusDetail: parsed.detail,
+            }));
+          },
+          onAssistantText: (payload) => {
+            updateAssistantMessage(assistantMsgId, (msg) => {
+              let nextContent = msg.content || "";
+              if (typeof payload.delta === "string") {
+                nextContent += payload.delta;
+              } else if (typeof payload.text === "string" && payload.text) {
+                nextContent =
+                  nextContent && nextContent !== payload.text
+                    ? `${nextContent}\n\n${payload.text}`
+                    : payload.text;
+              }
+              return {
+                ...msg,
+                content: nextContent,
+              };
+            });
+          },
+          onToolCall: (payload) => {
+            updateAssistantMessage(assistantMsgId, (msg) => ({
+              ...msg,
+              statusStage: "running_command",
+              statusLabel: "Running sandbox command",
+              executionSteps: [
+                ...(msg.executionSteps || []),
+                {
+                  type: "tool_call",
+                  toolName: payload.toolName,
+                  args: payload.args,
+                  output: "Running…",
+                },
+              ],
+            }));
+          },
+          onToolResult: (payload) => {
+            updateAssistantMessage(assistantMsgId, (msg) => {
+              const steps = [...(msg.executionSteps || [])];
+              let matchedIndex = -1;
+              for (let i = steps.length - 1; i >= 0; i--) {
+                if (
+                  steps[i].type === "tool_call" &&
+                  steps[i].toolName === payload.toolName &&
+                  steps[i].output === "Running…"
+                ) {
+                  matchedIndex = i;
+                  break;
+                }
+              }
+              if (matchedIndex >= 0) {
+                steps[matchedIndex] = { ...steps[matchedIndex], output: payload.output };
+              } else {
+                steps.push({
+                  type: "tool_call",
+                  toolName: payload.toolName,
+                  output: payload.output,
+                });
+              }
+              return {
+                ...msg,
+                executionSteps: steps,
+              };
+            });
+          },
+        });
+      } catch (streamErr: any) {
+        const isAbort = streamErr?.name === "AbortError" || timedOut || controller.signal.aborted;
+        const canFallback =
+          !isAbort &&
+          (streamErr instanceof StreamFallbackEligibleError ||
+            (streamErr instanceof TypeError && !(streamErr instanceof StreamProtocolError)));
+        if (canFallback) {
+          data = await executeJsonFallbackOnce();
+        } else {
+          throw streamErr;
+        }
       }
 
       if (data.sessionId && data.sessionId !== activeSessionId) {
         setActiveSessionId(data.sessionId);
       }
 
-      const agentMsgId = Math.random().toString(36).substring(2, 9);
-      const newAgentMsg: ChatMessage = {
-        id: agentMsgId,
-        role: "assistant",
-        content: data.text || "NanoGem completed execution.",
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        executionSteps: data.executionSteps || [],
+      updateAssistantMessage(assistantMsgId, (msg) => ({
+        ...msg,
+        content: data.text || msg.content || "NanoGem completed execution.",
+        executionSteps: Array.isArray(data.executionSteps)
+          ? data.executionSteps
+          : msg.executionSteps || [],
+        isStreaming: false,
+        statusStage: "completed",
+        statusLabel: "Completed",
+        statusDetail: undefined,
+        errorMessage: undefined,
         configuredModel: data.configuredModel || agentSettings.model,
         modelUsed: data.modelUsed || agentSettings.model,
         fallbackUsed: Boolean(data.fallbackUsed),
-      };
-
-      setMessages((prev) => [...prev, newAgentMsg]);
+      }));
 
       if (data.files) {
         setWorkspaceFiles(data.files);
       }
       return true;
     } catch (err: any) {
-      // Preserve prior conversation without duplicating failed attempts while keeping the prompt in the composer
-      setMessages(previousMessages);
+      const errorText = timedOut
+        ? "Request timed out while waiting for NanoGem."
+        : err instanceof Error || typeof err?.message === "string"
+          ? err.message || "Agent execution failed."
+          : "Agent execution failed.";
+
+      const code = typeof err?.code === "string" ? err.code : undefined;
+      const retryable =
+        timedOut || err instanceof StreamProtocolError || Boolean(err?.retryable) || err?.name === "TypeError";
+      const status = typeof err?.status === "number" ? err.status : undefined;
+
+      updateAssistantMessage(assistantMsgId, (msg) => ({
+        ...msg,
+        isStreaming: false,
+        statusStage: "failed",
+        statusLabel: "Failed",
+        errorMessage: errorText,
+      }));
+
       setLastRequestError({
-        error: err?.message || "Agent execution failed.",
-        code: typeof err?.code === "string" ? err.code : undefined,
-        retryable: Boolean(err?.retryable),
-        status: typeof err?.status === "number" ? err.status : undefined,
+        error: errorText,
+        code,
+        retryable,
+        status,
         failedPrompt: trimmed,
+        failedUserMsgId: userMsgId,
+        failedAssistantMsgId: assistantMsgId,
       });
       return false;
     } finally {
+      clearTimeout(timeoutId);
+      if (activeAbortControllerRef.current === controller) {
+        activeAbortControllerRef.current = null;
+      }
       inFlightSubmitRef.current = false;
       setIsExecuting(false);
     }
@@ -408,7 +576,14 @@ Always think step-by-step. Use your tools immediately when needed without asking
     if (!lastRequestError?.failedPrompt || inFlightSubmitRef.current || isExecuting) {
       return false;
     }
-    return handleSendMessage(lastRequestError.failedPrompt);
+    const replaceFailedTurn =
+      lastRequestError.failedUserMsgId && lastRequestError.failedAssistantMsgId
+        ? {
+            userMsgId: lastRequestError.failedUserMsgId,
+            assistantMsgId: lastRequestError.failedAssistantMsgId,
+          }
+        : undefined;
+    return handleSendMessage(lastRequestError.failedPrompt, { replaceFailedTurn });
   };
 
   const handleConfirmResetWorkspace = async () => {

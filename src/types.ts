@@ -20,6 +20,17 @@ export interface ExecutionStep {
   text?: string;
 }
 
+export type ChatStatusStage =
+  | "analyzing_request"
+  | "calling_gemini"
+  | "running_command"
+  | "command_completed"
+  | "command_failed"
+  | "reviewing_changes"
+  | "completed"
+  | "failed"
+  | "fallback";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -27,6 +38,10 @@ export interface ChatMessage {
   timestamp: string;
   executionSteps?: ExecutionStep[];
   isStreaming?: boolean;
+  statusStage?: ChatStatusStage;
+  statusLabel?: string;
+  statusDetail?: string;
+  errorMessage?: string;
   configuredModel?: string;
   modelUsed?: string;
   fallbackUsed?: boolean;
@@ -208,4 +223,6 @@ export interface AgentRequestError {
   retryable: boolean;
   status?: number;
   failedPrompt: string;
+  failedUserMsgId?: string;
+  failedAssistantMsgId?: string;
 }

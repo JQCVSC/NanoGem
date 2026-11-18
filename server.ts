@@ -8,6 +8,7 @@ import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_SYSTEM_INSTRUCTION,
   writeWorkspaceFile,
+  type AgentEvent,
 } from "./src/agent/agentService.ts";
 import {
   GeminiAgentError,
@@ -1145,7 +1146,8 @@ app.post("/api/projects/:projectId/workflows/run", async (req, res) => {
 
 async function executeProjectChatTurn(
   body: Record<string, unknown>,
-  onProgress?: (event: ProgressEvent) => void | Promise<void>
+  onProgress?: (event: ProgressEvent) => void | Promise<void>,
+  onAgentEvent?: (event: AgentEvent) => void | Promise<void>
 ) {
   const {
     message,
@@ -1219,7 +1221,10 @@ async function executeProjectChatTurn(
     protectContextFiles: true,
     sandboxConfig: projectSandbox,
     onPhase: (phase, turn) => progressStream.handlePhase(phase, turn),
-    onEvent: (event) => progressStream.handleAgentEvent(event),
+    onEvent: async (event) => {
+      await progressStream.handleAgentEvent(event);
+      await onAgentEvent?.(event);
+    },
   });
 
   sessionStore.appendMessage({
@@ -1297,28 +1302,59 @@ app.post("/api/agent/chat/stream", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
-  let disconnected = false;
-  req.on("close", () => {
-    disconnected = true;
+  let clientClosed = false;
+  res.on("close", () => {
+    if (!res.writableFinished) {
+      clientClosed = true;
+    }
   });
 
   const writeSse = (eventName: string, data: unknown) => {
-    if (disconnected || res.writableEnded || res.destroyed) return;
+    if (clientClosed || res.writableEnded || res.destroyed) return;
     res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
   try {
-    const payload = await executeProjectChatTurn(body, (progressEvent) => {
-      writeSse("progress", progressEvent);
-    });
+    const payload = await executeProjectChatTurn(
+      body,
+      (progressEvent) => {
+        writeSse("progress", progressEvent);
+      },
+      (agentEvent) => {
+        if (agentEvent.type === "assistant_text") {
+          writeSse("assistant_text", {
+            turn: agentEvent.turn,
+            text: agentEvent.text,
+            timestamp: agentEvent.timestamp,
+          });
+        } else if (agentEvent.type === "tool_call_requested") {
+          writeSse("tool_call", {
+            turn: agentEvent.turn,
+            toolName: agentEvent.toolName,
+            args: agentEvent.args,
+            timestamp: agentEvent.timestamp,
+          });
+        } else if (agentEvent.type === "tool_result") {
+          writeSse("tool_result", {
+            turn: agentEvent.turn,
+            toolName: agentEvent.toolName,
+            output: agentEvent.output,
+            success: agentEvent.success,
+            timestamp: agentEvent.timestamp,
+          });
+        }
+      }
+    );
     writeSse("result", payload);
   } catch (error: any) {
     const payload = toStructuredAgentErrorPayload(error);
     writeSse("error", payload);
   } finally {
-    if (!disconnected && !res.writableEnded && !res.destroyed) {
+    if (!clientClosed && !res.writableEnded && !res.destroyed) {
+      res.write("data: [DONE]\n\n");
       res.end();
     }
   }
