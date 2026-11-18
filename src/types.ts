@@ -198,3 +198,11 @@ export interface WorkflowTemplateInfo {
   maxTotalBytes: number;
   defaultGoal: string;
 }
+
+export interface AgentRequestError {
+  error: string;
+  code?: string;
+  retryable: boolean;
+  status?: number;
+  failedPrompt: string;
+}

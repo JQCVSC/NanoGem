@@ -9,6 +9,10 @@ import {
   DEFAULT_SYSTEM_INSTRUCTION,
   writeWorkspaceFile,
 } from "./src/agent/agentService.ts";
+import {
+  GeminiAgentError,
+  toStructuredAgentErrorPayload,
+} from "./src/agent/geminiErrors.ts";
 import { resolveAgentProvider } from "./src/agent/provider.ts";
 import {
   DEFAULT_GEMINI_MD_TEMPLATE,
@@ -1122,6 +1126,10 @@ app.post("/api/projects/:projectId/workflows/run", async (req, res) => {
       },
     });
   } catch (error: any) {
+    if (error instanceof GeminiAgentError) {
+      const payload = error.toPayload();
+      return res.status(payload.status).json(payload);
+    }
     const msg = error?.message || "Workflow failed";
     const status =
       typeof error?.statusCode === "number"
@@ -1164,6 +1172,8 @@ async function executeProjectChatTurn(
   if (!agentProvider.isConfigured()) {
     throw Object.assign(new Error("GEMINI_API_KEY is not configured on the server."), {
       statusCode: 503,
+      code: "GEMINI_INVALID_API_KEY",
+      retryable: false,
     });
   }
 
@@ -1243,13 +1253,11 @@ app.post("/api/agent/chat", async (req, res) => {
     const payload = await executeProjectChatTurn((req.body || {}) as Record<string, unknown>);
     res.json(payload);
   } catch (error: any) {
-    const status = typeof error?.statusCode === "number" ? error.statusCode : 500;
-    if (status >= 500) {
-      console.error("Agent chat error:", error);
+    const payload = toStructuredAgentErrorPayload(error);
+    if (payload.status >= 500) {
+      console.error(`[NanoGem Agent] status=${payload.status} code=${payload.code}: ${payload.error}`);
     }
-    res.status(status).json({
-      error: error.message || "Internal server error during agent execution.",
-    });
+    res.status(payload.status).json(payload);
   }
 });
 
@@ -1257,15 +1265,29 @@ app.post("/api/agent/chat", async (req, res) => {
 app.post("/api/agent/chat/stream", async (req, res) => {
   const body = (req.body || {}) as Record<string, unknown>;
   if (!body.message || typeof body.message !== "string") {
-    return res.status(400).json({ error: "Message is required" });
+    return res.status(400).json({
+      error: "Message is required",
+      code: "GEMINI_BAD_REQUEST",
+      retryable: false,
+      status: 400,
+    });
   }
   const preCheck = resolveProjectContext(body.projectId, body.sessionId);
   if (!preCheck.project) {
-    return res.status(preCheck.errorStatus || 404).json({ error: preCheck.errorMessage });
+    const preStatus = preCheck.errorStatus || 404;
+    return res.status(preStatus).json({
+      error: preCheck.errorMessage,
+      code: "PROJECT_NOT_FOUND",
+      retryable: false,
+      status: preStatus,
+    });
   }
   if (!agentProvider.isConfigured()) {
     return res.status(503).json({
       error: `${agentProvider.displayName} API key is not configured on the server.`,
+      code: "GEMINI_INVALID_API_KEY",
+      retryable: false,
+      status: 503,
     });
   }
 
@@ -1290,9 +1312,8 @@ app.post("/api/agent/chat/stream", async (req, res) => {
     });
     writeSse("result", payload);
   } catch (error: any) {
-    writeSse("error", {
-      error: error?.message || "Internal server error during agent execution.",
-    });
+    const payload = toStructuredAgentErrorPayload(error);
+    writeSse("error", payload);
   } finally {
     if (!disconnected && !res.writableEnded && !res.destroyed) {
       res.end();

@@ -2,6 +2,10 @@ import fs from "fs/promises";
 import path from "path";
 import { GoogleGenAI, Type, type FunctionDeclaration } from "@google/genai";
 import {
+  executeWithGeminiRetry,
+  type GeminiRetryLogEntry,
+} from "./geminiErrors.ts";
+import {
   executeSandboxCommandDetailed,
   resolveSafeWorkspacePath,
   type SandboxCommandResult,
@@ -123,6 +127,10 @@ export interface AgentServiceDependencies {
     command: string,
     config: SandboxConfig
   ) => Promise<SandboxCommandResult>;
+  retryDelaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  logger?: (entry: GeminiRetryLogEntry) => void;
 }
 
 export const agentFunctionDeclarations: FunctionDeclaration[] = [
@@ -299,15 +307,25 @@ export async function runGeminiAgent(
         currentTurnCount
       );
 
-      const response = await client.models.generateContent({
-        model,
-        contents: currentContents,
-        config: {
-          systemInstruction,
-          temperature,
-          tools: [{ functionDeclarations: agentFunctionDeclarations }],
-        },
-      });
+      const response = await executeWithGeminiRetry(
+        () =>
+          client.models.generateContent({
+            model,
+            contents: currentContents,
+            config: {
+              systemInstruction,
+              temperature,
+              tools: [{ functionDeclarations: agentFunctionDeclarations }],
+            },
+          }),
+        {
+          model,
+          retryDelaysMs: deps.retryDelaysMs,
+          sleep: deps.sleep,
+          now: deps.now,
+          logger: deps.logger,
+        }
+      );
 
       const candidate = response.candidates?.[0];
       if (!candidate) {

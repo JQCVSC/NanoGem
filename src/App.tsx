@@ -20,6 +20,7 @@ import {
   ProjectSummary,
   SessionSummary,
   AgentProgressEvent,
+  AgentRequestError,
 } from "./types";
 import { apiFetch, getStoredApiToken, onUnauthorized, setStoredApiToken } from "./api";
 
@@ -52,6 +53,8 @@ export default function App({
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [progressEvents, setProgressEvents] = useState<AgentProgressEvent[]>([]);
+  const [lastRequestError, setLastRequestError] = useState<AgentRequestError | null>(null);
+  const inFlightSubmitRef = useRef<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
@@ -100,6 +103,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
       if (res.ok) {
         const data = await res.json();
         setActiveSessionId(sessionId);
+        setLastRequestError(null);
         const restored: ChatMessage[] = (data.messages || []).map((m: any) => ({
           id: m.id,
           role: m.role,
@@ -249,6 +253,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         const data = await res.json();
         setSessions((prev) => [data.session, ...prev]);
         setActiveSessionId(data.session.id);
+        setLastRequestError(null);
         setMessages([]);
       }
     } catch (err) {
@@ -256,18 +261,25 @@ Always think step-by-step. Use your tools immediately when needed without asking
     }
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string): Promise<boolean> => {
+    const trimmed = text.trim();
+    if (!trimmed || inFlightSubmitRef.current || isExecuting) {
+      return false;
+    }
+
+    inFlightSubmitRef.current = true;
     const userMsgId = Math.random().toString(36).substring(2, 9);
     const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     const newUserMsg: ChatMessage = {
       id: userMsgId,
       role: "user",
-      content: text,
+      content: trimmed,
       timestamp: timeStr,
     };
 
     const previousMessages = [...messages];
+    setLastRequestError(null);
     setMessages([...previousMessages, newUserMsg]);
     setProgressEvents([]);
     setIsExecuting(true);
@@ -282,7 +294,7 @@ Always think step-by-step. Use your tools immediately when needed without asking
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: text,
+          message: trimmed,
           history,
           model: agentSettings.model,
           temperature: agentSettings.temperature,
@@ -294,7 +306,12 @@ Always think step-by-step. Use your tools immediately when needed without asking
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to communicate with NanoGem Agent");
+        throw {
+          message: errData.error || "Failed to communicate with NanoGem Agent",
+          code: errData.code,
+          retryable: Boolean(errData.retryable),
+          status: typeof errData.status === "number" ? errData.status : res.status,
+        };
       }
 
       const contentType = res.headers.get("content-type") || "";
@@ -331,7 +348,12 @@ Always think step-by-step. Use your tools immediately when needed without asking
             } else if (eventName === "result") {
               data = parsed;
             } else if (eventName === "error") {
-              throw new Error(parsed.error || "Agent execution failed.");
+              throw {
+                message: parsed.error || "Agent execution failed.",
+                code: parsed.code,
+                retryable: Boolean(parsed.retryable),
+                status: parsed.status,
+              };
             }
           }
         }
@@ -361,20 +383,29 @@ Always think step-by-step. Use your tools immediately when needed without asking
       if (data.files) {
         setWorkspaceFiles(data.files);
       }
+      return true;
     } catch (err: any) {
-      const errorMsgId = Math.random().toString(36).substring(2, 9);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: errorMsgId,
-          role: "assistant",
-          content: `Error executing agent task: ${err.message}`,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
+      // Preserve prior conversation without duplicating failed attempts while keeping the prompt in the composer
+      setMessages(previousMessages);
+      setLastRequestError({
+        error: err?.message || "Agent execution failed.",
+        code: typeof err?.code === "string" ? err.code : undefined,
+        retryable: Boolean(err?.retryable),
+        status: typeof err?.status === "number" ? err.status : undefined,
+        failedPrompt: trimmed,
+      });
+      return false;
     } finally {
+      inFlightSubmitRef.current = false;
       setIsExecuting(false);
     }
+  };
+
+  const handleRetryFailedPrompt = async (): Promise<boolean> => {
+    if (!lastRequestError?.failedPrompt || inFlightSubmitRef.current || isExecuting) {
+      return false;
+    }
+    return handleSendMessage(lastRequestError.failedPrompt);
   };
 
   const handleConfirmResetWorkspace = async () => {
@@ -509,6 +540,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
             runtimeStatus={runtimeStatus}
             draftPrompt={draftPrompt}
             onConsumeDraftPrompt={handleConsumeDraftPrompt}
+            lastError={lastRequestError}
+            onRetry={handleRetryFailedPrompt}
+            onDismissError={() => setLastRequestError(null)}
           />
         )}
 

@@ -183,7 +183,7 @@ test("runGeminiAgent emits failure events for rejected file paths, failed comman
     assert.match(toolResults[0].output, /Security Error/);
     assert.equal(toolResults[1].success, false);
 
-    // API error emits execution_error and propagates
+    // API error retries transient 503s, emits execution_error, and propagates structured error
     const failingEvents: AgentEvent[] = [];
     const errorClient: GeminiGenerateContentClient = {
       models: {
@@ -202,9 +202,9 @@ test("runGeminiAgent emits failure events for rejected file paths, failed comman
               failingEvents.push(ev);
             },
           },
-          { client: errorClient }
+          { client: errorClient, sleep: async () => {} }
         ),
-      /Gemini upstream 503/
+      /Gemini is temporarily unavailable because the selected model is under high demand\./
     );
     assert.equal(failingEvents.at(-1)?.type, "execution_error");
   } finally {

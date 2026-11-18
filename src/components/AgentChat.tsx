@@ -15,9 +15,11 @@ import {
   Zap,
   Lock,
   AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import {
   AgentProgressEvent,
+  AgentRequestError,
   ChatMessage,
   ExecutionStep,
   ProjectSummary,
@@ -26,7 +28,7 @@ import {
 
 interface AgentChatProps {
   messages: ChatMessage[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string) => Promise<boolean> | boolean | void;
   onSaveToMemory?: (text: string) => Promise<void>;
   isExecuting: boolean;
   progressEvents?: AgentProgressEvent[];
@@ -38,6 +40,9 @@ interface AgentChatProps {
   runtimeStatus: RuntimeStatus | null;
   draftPrompt?: string | null;
   onConsumeDraftPrompt?: () => void;
+  lastError?: AgentRequestError | null;
+  onRetry?: () => Promise<boolean> | boolean | void;
+  onDismissError?: () => void;
 }
 
 const SAMPLE_PROMPTS = [
@@ -87,6 +92,9 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   runtimeStatus,
   draftPrompt = null,
   onConsumeDraftPrompt,
+  lastError = null,
+  onRetry,
+  onDismissError,
 }) => {
   const [input, setInput] = useState("");
   const [savedMsgIds, setSavedMsgIds] = useState<Record<string, boolean>>({});
@@ -95,6 +103,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const localSubmitGuardRef = useRef(false);
 
   useEffect(() => {
     if (draftPrompt) {
@@ -129,30 +138,60 @@ export const AgentChat: React.FC<AgentChatProps> = ({
     : "/workspace";
   const branchLabel = runtimeStatus?.projectContext?.branch || "main";
 
-  const attemptSubmit = (rawText: string) => {
+  const attemptSubmit = async (rawText: string) => {
     const trimmed = rawText.trim();
-    if (!trimmed || isExecuting) return;
+    if (!trimmed || isExecuting || localSubmitGuardRef.current) return;
 
     if (DESTRUCTIVE_PATTERN.test(trimmed)) {
       setPendingDestructivePrompt(trimmed);
       return;
     }
 
-    onSendMessage(trimmed);
-    setInput("");
+    localSubmitGuardRef.current = true;
+    setInput(trimmed);
     setPendingDestructivePrompt(null);
+    try {
+      const succeeded = await onSendMessage(trimmed);
+      if (succeeded !== false) {
+        setInput("");
+      }
+    } finally {
+      localSubmitGuardRef.current = false;
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    attemptSubmit(input);
+    void attemptSubmit(input);
   };
 
-  const handleConfirmDestructive = () => {
-    if (!pendingDestructivePrompt || isExecuting) return;
-    onSendMessage(pendingDestructivePrompt);
-    setInput("");
+  const handleConfirmDestructive = async () => {
+    if (!pendingDestructivePrompt || isExecuting || localSubmitGuardRef.current) return;
+    const confirmed = pendingDestructivePrompt;
+    localSubmitGuardRef.current = true;
+    setInput(confirmed);
     setPendingDestructivePrompt(null);
+    try {
+      const succeeded = await onSendMessage(confirmed);
+      if (succeeded !== false) {
+        setInput("");
+      }
+    } finally {
+      localSubmitGuardRef.current = false;
+    }
+  };
+
+  const handleRetryClick = async () => {
+    if (!onRetry || isExecuting || localSubmitGuardRef.current) return;
+    localSubmitGuardRef.current = true;
+    try {
+      const succeeded = await onRetry();
+      if (succeeded !== false) {
+        setInput("");
+      }
+    } finally {
+      localSubmitGuardRef.current = false;
+    }
   };
 
   const handleCancelDestructive = () => {
@@ -433,6 +472,50 @@ export const AgentChat: React.FC<AgentChatProps> = ({
       {/* Bottom Floating Command Bar */}
       <div className="w-full pb-4 pt-2 px-4 flex justify-center shrink-0">
         <form onSubmit={handleSubmit} className="w-full max-w-3xl flex flex-col space-y-2">
+          {/* Structured Transient Error / Retry Banner */}
+          {lastError && (
+            <div
+              role="alert"
+              data-testid="agent-error-banner"
+              className="bg-rose-950/40 border border-rose-500/40 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div className="flex items-start gap-2.5 text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-semibold text-rose-200">{lastError.error}</p>
+                  <p className="text-[11px] font-mono text-slate-400">
+                    {lastError.status ? `HTTP ${lastError.status}` : "Request failed"}
+                    {lastError.code ? ` · ${lastError.code}` : ""}
+                    {lastError.retryable ? " · Prompt preserved below." : ""}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {onDismissError && (
+                  <button
+                    type="button"
+                    onClick={onDismissError}
+                    disabled={isExecuting}
+                    className="px-2.5 py-1.5 bg-[#0f172a] hover:bg-[#17233f] text-slate-300 rounded-lg text-xs font-medium"
+                  >
+                    Dismiss
+                  </button>
+                )}
+                {lastError.retryable && onRetry && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRetryClick()}
+                    disabled={isExecuting}
+                    className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Retry</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Destructive Confirmation State */}
           {pendingDestructivePrompt && (
             <div
