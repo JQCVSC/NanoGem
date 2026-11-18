@@ -595,7 +595,7 @@ if __name__ == "__main__":
 set -euo pipefail
 ./scripts/build-sandbox.sh
 docker run --rm --init \\
-  --mount type=bind,source="$(pwd)/sandbox_workspace",target=/workspace \\
+  -v "$(pwd)/sandbox_workspace:/workspace:rw" \\
   --workdir /workspace \\
   --user 1000:1000 \\
   --cap-drop=ALL \\
@@ -607,7 +607,8 @@ docker run --rm --init \\
   --pids-limit=64 \\
   --read-only \\
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777 \\
-  --tmpfs /home/sandbox:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \\
+  --tmpfs /run:rw,noexec,nosuid,nodev,size=16m,mode=1777 \\
+  --tmpfs /home/sandbox:rw,nosuid,nodev,size=64m,mode=1777 \\
   nanogem-sandbox:latest /bin/bash -c "ls -la"`,
   };
   res.json(codebase);

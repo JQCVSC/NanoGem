@@ -92,7 +92,7 @@ export const CodebaseExport: React.FC = () => {
 
 # 2. Run a command inside the isolated sandbox (no network, non-root, dropped caps)
 docker run --rm --init \\
-  --mount type=bind,source="$(pwd)/sandbox_workspace",target=/workspace \\
+  -v "$(pwd)/sandbox_workspace:/workspace:rw" \\
   --workdir /workspace \\
   --user 1000:1000 --cap-drop=ALL --security-opt=no-new-privileges:true \\
   --network=none --cpus=1.0 --memory=512m --memory-swap=512m --pids-limit=64 \\

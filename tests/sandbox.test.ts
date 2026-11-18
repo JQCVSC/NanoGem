@@ -53,11 +53,11 @@ test("buildDockerRunArgs enforces mount, non-root, cap-drop, no-new-privileges, 
   assert.ok(args.includes("--security-opt=no-new-privileges:true"));
   assert.ok(args.includes("--read-only"));
 
-  const mountIdx = args.indexOf("--mount");
-  assert.notEqual(mountIdx, -1);
-  assert.equal(args[mountIdx + 1], `type=bind,source=${cfg.workspaceDir},target=/workspace`);
-  // Only one --mount flag (only sandbox_workspace mounted)
-  assert.equal(args.filter((a) => a === "--mount").length, 1);
+  const volIdx = args.indexOf("-v");
+  assert.notEqual(volIdx, -1);
+  assert.equal(args[volIdx + 1], `${cfg.workspaceDir}:/workspace:rw`);
+  // Only one -v workspace mount flag (only sandbox_workspace mounted)
+  assert.equal(args.filter((a) => a === "-v").length, 1);
 
   assert.equal(args[args.indexOf("--user") + 1], "1000:1000");
   assert.equal(args[args.indexOf("--network") + 1], "none");
@@ -380,10 +380,59 @@ test("9. All hardened flags remain present when executing with either docker or 
       assert.equal(args[args.indexOf("--memory") + 1], "512m");
       assert.equal(args[args.indexOf("--memory-swap") + 1], "512m");
       assert.equal(args[args.indexOf("--pids-limit") + 1], "64");
-      assert.ok(args.includes(`type=bind,source=${cfg.workspaceDir},target=/workspace`));
-      assert.equal(args.filter((a) => a === "--tmpfs").length, 2);
+      assert.ok(args.includes(`${cfg.workspaceDir}:/workspace:rw`));
+      assert.equal(args.filter((a) => a === "--tmpfs").length, 3);
       assert.equal(directArgs.includes("--cap-drop=ALL"), true);
     }
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+test("regression: Podman args omit uid=1000/gid=1000 from mount options while preserving portable -v /workspace, --user 1000:1000, and --network none", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-podman-mount-"));
+  try {
+    const captured: Array<{ cmd: string; args: string[] }> = [];
+    const cfg = loadSandboxConfig(tmpWs, {
+      NANOGEM_EXECUTION_MODE: "docker",
+      NANOGEM_CONTAINER_RUNTIME: "podman",
+    });
+
+    const res = await executeSandboxCommandDetailed("ls -la /workspace/", cfg, {
+      probe: createMockProbe(new Set(["podman"])),
+      spawnProcess: createCapturingSpawn(captured),
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].cmd, "podman");
+
+    const args = captured[0].args;
+    const mountArgs: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "-v" || args[i] === "--mount" || args[i] === "--tmpfs") {
+        mountArgs.push(args[i + 1] || "");
+      }
+    }
+
+    assert.ok(mountArgs.length >= 4);
+    for (const mountVal of mountArgs) {
+      assert.equal(mountVal.includes("uid=1000"), false, `Unexpected uid=1000 in mount option: ${mountVal}`);
+      assert.equal(mountVal.includes("gid=1000"), false, `Unexpected gid=1000 in mount option: ${mountVal}`);
+    }
+
+    assert.equal(args[args.indexOf("-v") + 1], `${cfg.workspaceDir}:/workspace:rw`);
+    assert.equal(args[args.indexOf("--user") + 1], "1000:1000");
+    assert.equal(args[args.indexOf("--network") + 1], "none");
+    assert.ok(args.includes("--cap-drop=ALL"));
+    assert.ok(args.includes("--security-opt=no-new-privileges:true"));
+    assert.ok(args.includes("--read-only"));
+    assert.ok(mountArgs.some((m) => m.startsWith("/tmp:")));
+    assert.ok(mountArgs.some((m) => m.startsWith("/run:")));
+    assert.ok(mountArgs.some((m) => m.startsWith("/home/sandbox:")));
+    assert.equal(args[args.indexOf("--cpus") + 1], "1.0");
+    assert.equal(args[args.indexOf("--memory") + 1], "512m");
+    assert.equal(args[args.indexOf("--pids-limit") + 1], "64");
   } finally {
     await fs.rm(tmpWs, { recursive: true, force: true });
   }

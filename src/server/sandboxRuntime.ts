@@ -207,8 +207,8 @@ export function buildDockerRunArgs(
     containerName,
     "--workdir",
     "/workspace",
-    "--mount",
-    `type=bind,source=${config.workspaceDir},target=/workspace`,
+    "-v",
+    `${config.workspaceDir}:/workspace:rw`,
     "--user",
     config.dockerUser,
     "--cap-drop=ALL",
@@ -226,17 +226,14 @@ export function buildDockerRunArgs(
   ];
 
   if (config.dockerReadOnly) {
-    const numericMatch = /^(\d+)(?::(\d+))?$/.exec(config.dockerUser);
-    const homeTmpfsOpts = numericMatch
-      ? `rw,nosuid,nodev,size=64m,uid=${numericMatch[1]},gid=${numericMatch[2] ?? numericMatch[1]}`
-      : "rw,nosuid,nodev,size=64m,mode=1777";
-
     args.push(
       "--read-only",
       "--tmpfs",
       "/tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777",
       "--tmpfs",
-      `/home/sandbox:${homeTmpfsOpts}`
+      "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+      "--tmpfs",
+      "/home/sandbox:rw,nosuid,nodev,size=64m,mode=1777"
     );
   }
 
@@ -509,7 +506,9 @@ async function executeInContainerDetailed(
           ? `\nHint: Pull or build the sandbox image first (expected image: ${config.dockerImage}; e.g. '${runtime} pull ${config.dockerImage}' or './scripts/build-sandbox.sh').`
           : /Cannot connect to the Docker daemon|is the docker daemon running|cannot connect to Podman/i.test(stderr)
             ? `\nHint: Ensure the ${runtime} daemon/machine is running.`
-            : "";
+            : runtime === "podman" && /memory\.max|controller `[^`]+` is not available/i.test(stderr)
+              ? `\nHint: Podman rootless cgroupfs cannot enforce --cpus/--memory/--pids-limit. Switch Podman machine to rootful mode: 'podman machine stop && podman machine set --rootful && podman machine start'.`
+              : "";
       const message = `Error executing command via ${runtime} (exit code ${code ?? "unknown"}):\n${combined}${hint}`.trim();
       finish({ ok: false, output: message, exitCode: code, error: message });
     });
