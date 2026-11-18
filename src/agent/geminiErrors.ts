@@ -275,14 +275,40 @@ export function classifyGeminiError(err: unknown, model?: string): GeminiErrorCl
 
 export function defaultGeminiRetryLogger(entry: GeminiRetryLogEntry): void {
   const safeModel = redactSecretLikeTokens(entry.model || "unknown");
-  const outcome =
-    entry.nextDelayMs !== undefined
-      ? `retrying_in=${entry.nextDelayMs}ms`
-      : entry.retryable
-        ? "retries_exhausted"
-        : "non_retryable";
   console.warn(
-    `[NanoGem Gemini] status=${entry.status} model=${safeModel} attempt=${entry.attempt}/${entry.maxAttempts} elapsed=${entry.elapsedMs}ms outcome=${outcome}`
+    `[NanoGem Gemini] model=${safeModel} status=${entry.status} attempt=${entry.attempt}/${entry.maxAttempts} elapsed=${entry.elapsedMs}ms`
+  );
+}
+
+export function shouldFallbackForGeminiError(err: unknown): boolean {
+  if (!(err instanceof GeminiAgentError) || !err.retryable) {
+    return false;
+  }
+  return err.upstreamStatus === 503 || err.upstreamStatus === 429;
+}
+
+export function createBothModelsFailedError(
+  primaryModel: string,
+  fallbackModel: string,
+  primaryError: GeminiAgentError,
+  fallbackError: unknown
+): GeminiAgentError {
+  const fallbackClass = classifyGeminiError(fallbackError, fallbackModel);
+  const primaryStatus = primaryError.upstreamStatus ?? primaryError.status;
+  const fallbackStatus = fallbackClass.upstreamStatus ?? fallbackClass.status;
+  const retryable = fallbackClass.retryable;
+
+  return new GeminiAgentError(
+    {
+      retryable,
+      status: retryable ? (fallbackStatus === 429 && primaryStatus === 429 ? 429 : 503) : fallbackClass.status,
+      upstreamStatus: fallbackStatus,
+      code: retryable ? "GEMINI_TEMPORARILY_UNAVAILABLE" : fallbackClass.code,
+      message: retryable
+        ? `Gemini is temporarily unavailable on both primary model (${primaryModel}, status ${primaryStatus}) and fallback model (${fallbackModel}, status ${fallbackStatus}). Please try again shortly.`
+        : `Gemini failed on both primary model (${primaryModel}, status ${primaryStatus}) and fallback model (${fallbackModel}, status ${fallbackStatus}): ${fallbackClass.message}`,
+    },
+    fallbackModel
   );
 }
 

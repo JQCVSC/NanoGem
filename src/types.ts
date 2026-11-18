@@ -27,6 +27,9 @@ export interface ChatMessage {
   timestamp: string;
   executionSteps?: ExecutionStep[];
   isStreaming?: boolean;
+  configuredModel?: string;
+  modelUsed?: string;
+  fallbackUsed?: boolean;
 }
 
 export interface NanoGeminiSource {

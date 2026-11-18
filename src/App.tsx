@@ -376,6 +376,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
         content: data.text || "NanoGem completed execution.",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         executionSteps: data.executionSteps || [],
+        configuredModel: data.configuredModel || agentSettings.model,
+        modelUsed: data.modelUsed || agentSettings.model,
+        fallbackUsed: Boolean(data.fallbackUsed),
       };
 
       setMessages((prev) => [...prev, newAgentMsg]);
@@ -603,6 +606,9 @@ Always think step-by-step. Use your tools immediately when needed without asking
                   content: data.text || "Workflow completed.",
                   timestamp: now,
                   executionSteps: data.executionSteps || [],
+                  configuredModel: data.configuredModel || agentSettings.model,
+                  modelUsed: data.modelUsed || agentSettings.model,
+                  fallbackUsed: Boolean(data.fallbackUsed),
                 },
               ]);
               if (data.files) setWorkspaceFiles(data.files);

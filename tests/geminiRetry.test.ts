@@ -8,6 +8,8 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import esbuild from "esbuild";
 import {
+  DEFAULT_FALLBACK_GEMINI_MODEL,
+  DEFAULT_GEMINI_MODEL,
   runGeminiAgent,
   type GeminiGenerateContentClient,
 } from "../src/agent/agentService.ts";
@@ -123,6 +125,7 @@ test("runGeminiAgent caps retries at 2 (1s then 3s) and throws exact structured 
         {
           message: "Keep failing",
           model: "gemini-3.6-flash",
+          fallbackModel: "",
           sandboxConfig: cfg,
         },
         {
@@ -239,7 +242,7 @@ test("invalid API key and permission errors are not retried and never leak keys 
   assert.equal(attempts, 1);
   assert.deepEqual(sleeps, []);
   assert.equal(loggedStrings.length, 1);
-  assert.match(loggedStrings[0], /status=400 model=gemini-3\.6-flash attempt=1\/3/);
+  assert.match(loggedStrings[0], /model=gemini-3\.6-flash status=400 attempt=1\/3 elapsed=\d+ms/);
   assert.doesNotMatch(loggedStrings[0], new RegExp(fakeKey));
 });
 
@@ -859,6 +862,319 @@ test("UI prevents duplicate submissions while active, returns from Running to Ex
       false
     );
     assert.equal(textarea.value, "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await act(async () => {
+      root.unmount();
+    });
+    dom.restore();
+  }
+});
+
+test("model fallback: primary success uses configured primary model without invoking fallback", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-fallback-primary-"));
+  try {
+    const cfg = loadSandboxConfig(tmpWs, { NANOGEM_EXECUTION_MODE: "docker" });
+    const calledModels: string[] = [];
+
+    const mockClient: GeminiGenerateContentClient = {
+      models: {
+        async generateContent(params) {
+          calledModels.push(params.model);
+          return {
+            text: "Primary answer",
+            candidates: [{ content: { role: "model", parts: [{ text: "Primary answer" }] } }],
+            functionCalls: [],
+          };
+        },
+      },
+    };
+
+    const result = await runGeminiAgent(
+      {
+        message: "Run on primary",
+        model: DEFAULT_GEMINI_MODEL,
+        sandboxConfig: cfg,
+      },
+      { client: mockClient, sleep: async () => {}, logger: () => {} }
+    );
+
+    assert.deepEqual(calledModels, [DEFAULT_GEMINI_MODEL]);
+    assert.equal(result.configuredModel, DEFAULT_GEMINI_MODEL);
+    assert.equal(result.modelUsed, DEFAULT_GEMINI_MODEL);
+    assert.equal(result.fallbackUsed, false);
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+test("model fallback: primary 503 after retries triggers single fallback attempt and preserves configured model", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-fallback-503-"));
+  try {
+    const cfg = loadSandboxConfig(tmpWs, { NANOGEM_EXECUTION_MODE: "docker" });
+    const calledModels: string[] = [];
+    const logs: GeminiRetryLogEntry[] = [];
+    let tick = 100;
+
+    const mockClient: GeminiGenerateContentClient = {
+      models: {
+        async generateContent(params) {
+          calledModels.push(params.model);
+          tick += 25;
+          if (params.model === DEFAULT_GEMINI_MODEL) {
+            throw Object.assign(new Error("503 UNAVAILABLE"), { status: 503 });
+          }
+          return {
+            text: "Fallback answer",
+            candidates: [{ content: { role: "model", parts: [{ text: "Fallback answer" }] } }],
+            functionCalls: [],
+          };
+        },
+      },
+    };
+
+    const result = await runGeminiAgent(
+      {
+        message: "Need answer despite 503",
+        model: DEFAULT_GEMINI_MODEL,
+        fallbackModel: DEFAULT_FALLBACK_GEMINI_MODEL,
+        sandboxConfig: cfg,
+      },
+      {
+        client: mockClient,
+        sleep: async () => {},
+        now: () => tick,
+        logger: (entry) => logs.push(entry),
+      }
+    );
+
+    // 3 attempts on primary (initial + 2 retries), then 1 attempt on fallback
+    assert.deepEqual(calledModels, [
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_FALLBACK_GEMINI_MODEL,
+    ]);
+    assert.equal(result.text, "Fallback answer");
+    assert.equal(result.configuredModel, DEFAULT_GEMINI_MODEL);
+    assert.equal(result.modelUsed, DEFAULT_FALLBACK_GEMINI_MODEL);
+    assert.equal(result.fallbackUsed, true);
+
+    assert.equal(logs.length, 4);
+    assert.equal(logs[3].model, DEFAULT_FALLBACK_GEMINI_MODEL);
+    assert.equal(logs[3].status, 200);
+    assert.equal(logs[3].attempt, 1);
+    assert.ok(logs[3].elapsedMs >= 25);
+
+    // Next turn with non-failing client still attempts configured primary model first (never permanently replaced)
+    const nextCalls: string[] = [];
+    const recoveredClient: GeminiGenerateContentClient = {
+      models: {
+        async generateContent(params) {
+          nextCalls.push(params.model);
+          return {
+            text: "Back on primary",
+            candidates: [{ content: { role: "model", parts: [{ text: "Back on primary" }] } }],
+            functionCalls: [],
+          };
+        },
+      },
+    };
+    const nextRes = await runGeminiAgent(
+      {
+        message: "Second prompt",
+        sandboxConfig: cfg,
+      },
+      { client: recoveredClient, sleep: async () => {}, logger: () => {} }
+    );
+    assert.deepEqual(nextCalls, [DEFAULT_GEMINI_MODEL]);
+    assert.equal(nextRes.modelUsed, DEFAULT_GEMINI_MODEL);
+    assert.equal(nextRes.fallbackUsed, false);
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+test("model fallback: both primary and fallback failing throws clear error; non-retryable errors do not fallback", async () => {
+  const tmpWs = await fs.mkdtemp(path.join(os.tmpdir(), "nanogem-fallback-both-"));
+  try {
+    const cfg = loadSandboxConfig(tmpWs, { NANOGEM_EXECUTION_MODE: "docker" });
+    const calledBoth: string[] = [];
+    const logs: GeminiRetryLogEntry[] = [];
+
+    const bothFailClient: GeminiGenerateContentClient = {
+      models: {
+        async generateContent(params) {
+          calledBoth.push(params.model);
+          if (params.model === DEFAULT_GEMINI_MODEL) {
+            throw Object.assign(new Error("503 UNAVAILABLE"), { status: 503 });
+          }
+          throw Object.assign(new Error("429 RESOURCE_EXHAUSTED"), { status: 429 });
+        },
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        runGeminiAgent(
+          {
+            message: "Both fail",
+            model: DEFAULT_GEMINI_MODEL,
+            fallbackModel: DEFAULT_FALLBACK_GEMINI_MODEL,
+            sandboxConfig: cfg,
+          },
+          {
+            client: bothFailClient,
+            sleep: async () => {},
+            logger: (entry) => logs.push(entry),
+          }
+        ),
+      (err: unknown) => {
+        const payload = toStructuredAgentErrorPayload(err);
+        assert.match(payload.error, new RegExp(DEFAULT_GEMINI_MODEL));
+        assert.match(payload.error, new RegExp(DEFAULT_FALLBACK_GEMINI_MODEL));
+        assert.equal(payload.retryable, true);
+        assert.equal(payload.code, "GEMINI_TEMPORARILY_UNAVAILABLE");
+        return true;
+      }
+    );
+
+    assert.deepEqual(calledBoth, [
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_GEMINI_MODEL,
+      DEFAULT_FALLBACK_GEMINI_MODEL,
+    ]);
+    assert.equal(logs[3].model, DEFAULT_FALLBACK_GEMINI_MODEL);
+    assert.equal(logs[3].status, 429);
+    assert.equal(logs[3].attempt, 1);
+
+    // Invalid API key / invalid model / permission / malformed errors never fallback
+    for (const err of [
+      Object.assign(new Error("API_KEY_INVALID"), { status: 400 }),
+      Object.assign(new Error("PERMISSION_DENIED"), { status: 403 }),
+      Object.assign(new Error("INVALID_ARGUMENT: malformed"), { status: 400 }),
+      Object.assign(new Error("models/bad-model is not found"), { status: 404 }),
+    ]) {
+      const nonFallbackCalls: string[] = [];
+      await assert.rejects(() =>
+        runGeminiAgent(
+          {
+            message: "Should not fallback",
+            model: DEFAULT_GEMINI_MODEL,
+            fallbackModel: DEFAULT_FALLBACK_GEMINI_MODEL,
+            sandboxConfig: cfg,
+          },
+          {
+            client: {
+              models: {
+                async generateContent(params) {
+                  nonFallbackCalls.push(params.model);
+                  throw err;
+                },
+              },
+            },
+            sleep: async () => {},
+            logger: () => {},
+          }
+        )
+      );
+      assert.deepEqual(nonFallbackCalls, [DEFAULT_GEMINI_MODEL]);
+    }
+  } finally {
+    await fs.rm(tmpWs, { recursive: true, force: true });
+  }
+});
+
+test("UI displays which model answered (including fallback badge) without altering configured model", async () => {
+  const dom = installFakeDom();
+  const container = dom.doc.createElement("div");
+  dom.doc.body.appendChild(container);
+  const root = createRoot(container as unknown as Element);
+
+  const originalFetch = globalThis.fetch;
+  const requestedModels: string[] = [];
+  let turn = 0;
+
+  (globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+    if (String(url).includes("/api/agent/chat/stream")) {
+      const body = JSON.parse(String(init?.body || "{}"));
+      requestedModels.push(body.model);
+      turn++;
+      return new Response(
+        JSON.stringify(
+          turn === 1
+            ? {
+                text: "Answered using fallback model.",
+                executionSteps: [],
+                files: [],
+                sessionId: TEST_SESSION.id,
+                configuredModel: DEFAULT_GEMINI_MODEL,
+                modelUsed: DEFAULT_FALLBACK_GEMINI_MODEL,
+                fallbackUsed: true,
+              }
+            : {
+                text: "Answered using primary model.",
+                executionSteps: [],
+                files: [],
+                sessionId: TEST_SESSION.id,
+                configuredModel: DEFAULT_GEMINI_MODEL,
+                modelUsed: DEFAULT_GEMINI_MODEL,
+                fallbackUsed: false,
+              }
+        ),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  try {
+    await act(async () => {
+      root.render(
+        React.createElement(AppComponent, {
+          skipInitialFetch: true,
+          initialTab: "chat",
+          initialRuntimeStatus: READY_RUNTIME,
+          initialProjects: [TEST_PROJECT],
+          initialProjectId: TEST_PROJECT.id,
+          initialSessions: [TEST_SESSION],
+          initialActiveSessionId: TEST_SESSION.id,
+        })
+      );
+    });
+
+    await act(async () => {
+      findButtonByText(container, "Inspect repository files and summarize architecture").click();
+    });
+
+    const badgesAfterFirst = collectElements(container).filter(
+      (el) => el.getAttribute("data-testid") === "message-model-badge"
+    );
+    assert.equal(badgesAfterFirst.length, 1);
+    assert.match(
+      badgesAfterFirst[0].textContent,
+      /Model: gemini-3\.8-flash \(fallback from gemini-3\.6-flash\)/
+    );
+
+    // Send another prompt via slash chip + Execute: verify configured model stayed gemini-3.6-flash
+    await act(async () => {
+      findButtonByText(container, "/test").click();
+    });
+    const submitBtn = collectElements(container).find(
+      (el) => el.tagName === "BUTTON" && el.getAttribute("type") === "submit"
+    );
+    assert.ok(submitBtn);
+    await act(async () => {
+      submitBtn.click();
+    });
+
+    assert.deepEqual(requestedModels, [DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_MODEL]);
+    const badgesAfterSecond = collectElements(container).filter(
+      (el) => el.getAttribute("data-testid") === "message-model-badge"
+    );
+    assert.equal(badgesAfterSecond.length, 2);
+    assert.equal(badgesAfterSecond[1].textContent.trim(), "Model: gemini-3.6-flash");
   } finally {
     globalThis.fetch = originalFetch;
     await act(async () => {

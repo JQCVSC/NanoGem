@@ -2,7 +2,11 @@ import fs from "fs/promises";
 import path from "path";
 import { GoogleGenAI, Type, type FunctionDeclaration } from "@google/genai";
 import {
+  GeminiAgentError,
+  createBothModelsFailedError,
+  defaultGeminiRetryLogger,
   executeWithGeminiRetry,
+  shouldFallbackForGeminiError,
   type GeminiRetryLogEntry,
 } from "./geminiErrors.ts";
 import {
@@ -13,7 +17,23 @@ import {
 } from "../server/sandboxRuntime.ts";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+export const DEFAULT_FALLBACK_GEMINI_MODEL = "gemini-3.8-flash";
 export const DEFAULT_MAX_TURNS = 8;
+
+export function resolveFallbackGeminiModel(
+  primaryModel: string,
+  requestedFallback?: string,
+  env: NodeJS.ProcessEnv = process.env
+): string | undefined {
+  const candidate =
+    requestedFallback !== undefined
+      ? requestedFallback.trim()
+      : env.NANOGEM_FALLBACK_GEMINI_MODEL?.trim() || DEFAULT_FALLBACK_GEMINI_MODEL;
+  if (!candidate || candidate === primaryModel) {
+    return undefined;
+  }
+  return candidate;
+}
 
 export const DEFAULT_SYSTEM_INSTRUCTION = `You are NanoGemini, an autonomous developer agent running inside a secure, isolated Docker sandbox.
 You have the ability to execute bash terminal commands and write files directly to the file system.
@@ -77,6 +97,9 @@ export type AgentEvent =
       turn: number;
       text: string;
       maxTurnsReached: boolean;
+      configuredModel?: string;
+      modelUsed?: string;
+      fallbackUsed?: boolean;
       timestamp: string;
     }
   | { type: "execution_error"; turn: number; error: string; timestamp: string };
@@ -103,6 +126,7 @@ export interface AgentRunInput {
   message: string;
   history?: AgentHistoryMessage[];
   model?: string;
+  fallbackModel?: string;
   temperature?: number;
   systemInstruction?: string;
   maxTurns?: number;
@@ -118,6 +142,9 @@ export interface AgentRunResult {
   events: AgentEvent[];
   turns: number;
   maxTurnsReached: boolean;
+  configuredModel: string;
+  modelUsed: string;
+  fallbackUsed: boolean;
 }
 
 export interface AgentServiceDependencies {
@@ -274,13 +301,18 @@ export async function runGeminiAgent(
   }
 
   const maxTurns = normalizeMaxTurns(input.maxTurns);
-  const model = input.model?.trim() || DEFAULT_GEMINI_MODEL;
+  const configuredModel = input.model?.trim() || DEFAULT_GEMINI_MODEL;
+  const fallbackModel = resolveFallbackGeminiModel(configuredModel, input.fallbackModel);
+  let activeModel = configuredModel;
+  let fallbackUsed = false;
   const temperature =
     typeof input.temperature === "number" && Number.isFinite(input.temperature)
       ? input.temperature
       : 0;
   const systemInstruction = input.systemInstruction ?? DEFAULT_SYSTEM_INSTRUCTION;
   const executeCommand = deps.executeCommand ?? executeSandboxCommandDetailed;
+  const nowFn = deps.now ?? (() => Date.now());
+  const logFn = deps.logger ?? defaultGeminiRetryLogger;
 
   const events: AgentEvent[] = [];
   const executionSteps: AgentExecutionStep[] = [];
@@ -307,25 +339,72 @@ export async function runGeminiAgent(
         currentTurnCount
       );
 
-      const response = await executeWithGeminiRetry(
-        () =>
-          client.models.generateContent({
-            model,
-            contents: currentContents,
-            config: {
-              systemInstruction,
-              temperature,
-              tools: [{ functionDeclarations: agentFunctionDeclarations }],
-            },
-          }),
-        {
-          model,
-          retryDelaysMs: deps.retryDelaysMs,
-          sleep: deps.sleep,
-          now: deps.now,
-          logger: deps.logger,
+      let response: GeminiGenerateContentResponse;
+      try {
+        response = await executeWithGeminiRetry(
+          () =>
+            client.models.generateContent({
+              model: activeModel,
+              contents: currentContents,
+              config: {
+                systemInstruction,
+                temperature,
+                tools: [{ functionDeclarations: agentFunctionDeclarations }],
+              },
+            }),
+          {
+            model: activeModel,
+            retryDelaysMs: fallbackUsed ? [] : deps.retryDelaysMs,
+            sleep: deps.sleep,
+            now: nowFn,
+            logger: logFn,
+          }
+        );
+      } catch (primaryError) {
+        if (!fallbackUsed && fallbackModel && shouldFallbackForGeminiError(primaryError)) {
+          const fallbackStartedAt = nowFn();
+          try {
+            response = await executeWithGeminiRetry(
+              () =>
+                client.models.generateContent({
+                  model: fallbackModel,
+                  contents: currentContents,
+                  config: {
+                    systemInstruction,
+                    temperature,
+                    tools: [{ functionDeclarations: agentFunctionDeclarations }],
+                  },
+                }),
+              {
+                model: fallbackModel,
+                retryDelaysMs: [],
+                sleep: deps.sleep,
+                now: nowFn,
+                logger: logFn,
+              }
+            );
+            activeModel = fallbackModel;
+            fallbackUsed = true;
+            logFn({
+              status: 200,
+              model: fallbackModel,
+              attempt: 1,
+              maxAttempts: 1,
+              elapsedMs: Math.max(0, nowFn() - fallbackStartedAt),
+              retryable: false,
+            });
+          } catch (fallbackError) {
+            throw createBothModelsFailedError(
+              configuredModel,
+              fallbackModel,
+              primaryError as GeminiAgentError,
+              fallbackError
+            );
+          }
+        } else {
+          throw primaryError;
         }
-      );
+      }
 
       const candidate = response.candidates?.[0];
       if (!candidate) {
@@ -343,6 +422,9 @@ export async function runGeminiAgent(
           turn: currentTurnCount,
           text: finalText,
           maxTurnsReached: false,
+          configuredModel,
+          modelUsed: activeModel,
+          fallbackUsed,
           timestamp: new Date().toISOString(),
         });
         break;
@@ -480,6 +562,9 @@ export async function runGeminiAgent(
             turn: currentTurnCount,
             text: finalText,
             maxTurnsReached: true,
+            configuredModel,
+            modelUsed: activeModel,
+            fallbackUsed,
             timestamp: new Date().toISOString(),
           });
           break;
@@ -501,6 +586,9 @@ export async function runGeminiAgent(
           turn: currentTurnCount,
           text: finalText,
           maxTurnsReached: false,
+          configuredModel,
+          modelUsed: activeModel,
+          fallbackUsed,
           timestamp: new Date().toISOString(),
         });
         break;
@@ -513,6 +601,9 @@ export async function runGeminiAgent(
       events,
       turns: currentTurnCount,
       maxTurnsReached,
+      configuredModel,
+      modelUsed: activeModel,
+      fallbackUsed,
     };
   } catch (error: any) {
     const errorMessage = error?.message || "Agent execution failed.";

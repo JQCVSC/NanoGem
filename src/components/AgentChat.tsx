@@ -370,6 +370,20 @@ export const AgentChat: React.FC<AgentChatProps> = ({
                   <span className="text-xs font-semibold text-slate-200">
                     {msg.role === "user" ? "You" : "NanoGem Agent"}
                   </span>
+                  {msg.role === "assistant" && msg.modelUsed && (
+                    <span
+                      data-testid="message-model-badge"
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-mono border ${
+                        msg.fallbackUsed
+                          ? "bg-amber-950/40 text-amber-300 border-amber-500/40"
+                          : "bg-[#0c1424] text-slate-300 border-[#1b2b48]"
+                      }`}
+                    >
+                      {msg.fallbackUsed
+                        ? `Model: ${msg.modelUsed} (fallback from ${msg.configuredModel || "primary"})`
+                        : `Model: ${msg.modelUsed}`}
+                    </span>
+                  )}
                   <span className="text-xs text-slate-500 tabular-nums font-mono">
                     {msg.timestamp}
                   </span>

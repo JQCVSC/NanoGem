@@ -204,7 +204,7 @@ test("runGeminiAgent emits failure events for rejected file paths, failed comman
           },
           { client: errorClient, sleep: async () => {} }
         ),
-      /Gemini is temporarily unavailable because the selected model is under high demand\./
+      /Gemini is temporarily unavailable/
     );
     assert.equal(failingEvents.at(-1)?.type, "execution_error");
   } finally {
