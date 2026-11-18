@@ -23,10 +23,12 @@ import {
   X,
   ArrowUpRight,
   Check,
+  Home,
 } from "lucide-react";
 import { ProjectSummary, RuntimeStatus, SessionSummary } from "../types";
 
 export type AppTab =
+  | "home"
   | "chat"
   | "files"
   | "context"
@@ -56,6 +58,7 @@ interface HeaderProps {
 }
 
 const PRIMARY_TABS: Array<{ id: AppTab; label: string; icon: React.FC<{ className?: string }> }> = [
+  { id: "home", label: "Home", icon: Home },
   { id: "chat", label: "Agent", icon: MessageSquareCode },
   { id: "files", label: "Files", icon: FolderTree },
   { id: "context", label: "Memory", icon: BookOpen },
@@ -180,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Logo */}
           <button
             type="button"
-            onClick={() => selectTab("chat")}
+            onClick={() => selectTab("home")}
             className="flex items-center gap-2.5 whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 rounded-lg"
           >
             <div aria-label="NanoGem Logo" className="flex items-center justify-center shrink-0">
