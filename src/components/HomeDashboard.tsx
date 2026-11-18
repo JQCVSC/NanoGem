@@ -143,7 +143,9 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
     ? "Host Mode (Direct)"
     : selectedRuntime === "docker"
       ? "Docker Sandbox"
-      : "Podman Sandbox";
+      : selectedRuntime === "podman"
+        ? "Podman Sandbox"
+        : "Container Sandbox";
 
   const executionStateText = isHostMode
     ? "Isolation Disabled"
@@ -202,6 +204,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 shrink-0">
               <button
                 type="button"
+                data-testid="home-open-agent"
                 onClick={() => onSelectTab("chat")}
                 className="px-4 py-2.5 bg-sky-400 hover:bg-sky-300 text-[#060914] font-semibold rounded-lg text-xs sm:text-sm flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
               >
@@ -225,6 +228,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         <section aria-label="Workspace runtime summary" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <button
             type="button"
+            data-testid="home-execution-boundary"
             onClick={() => onSelectTab("setup")}
             className="text-left bg-[#0b1022] hover:bg-[#0e152e] border border-[#1b2544] hover:border-sky-400/40 rounded-xl p-4 transition-colors space-y-2"
           >
@@ -236,17 +240,18 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
               )}
             </div>
-            <div className="text-sm font-semibold text-white font-mono truncate">
+            <div data-testid="home-runtime-provider" className="text-sm font-semibold text-white font-mono truncate">
               {executionLabel}
             </div>
             <div className="text-xs font-mono text-slate-400 flex items-center gap-1.5 truncate">
               <span
+                data-testid="home-readiness-badge"
                 className={
                   isHostMode
                     ? "text-amber-300"
                     : sandboxReady
                       ? "text-emerald-400"
-                      : "text-slate-300"
+                      : "text-rose-300"
                 }
               >
                 {executionStateText}
@@ -258,6 +263,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
           <button
             type="button"
+            data-testid="home-active-project"
             onClick={() => onSelectTab("files")}
             className="text-left bg-[#0b1022] hover:bg-[#0e152e] border border-[#1b2544] hover:border-sky-400/40 rounded-xl p-4 transition-colors space-y-2"
           >
@@ -283,6 +289,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
           <button
             type="button"
+            data-testid="home-active-session"
             onClick={() => onSelectTab("chat")}
             className="text-left bg-[#0b1022] hover:bg-[#0e152e] border border-[#1b2544] hover:border-sky-400/40 rounded-xl p-4 transition-colors space-y-2"
           >
@@ -330,6 +337,42 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </button>
         </section>
 
+        {/* Runtime Remediation Notice when Sandbox Is Not Ready */}
+        {runtimeStatus && !isHostMode && !sandboxReady && (
+          <section
+            role="alert"
+            data-testid="home-runtime-warning"
+            className="bg-rose-950/35 border border-rose-500/40 rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-rose-300 font-mono text-xs sm:text-sm font-semibold">
+                <ShieldAlert className="w-4 h-4 shrink-0" />
+                <span>
+                  {runtimeAvailable
+                    ? "Sandbox image missing — container runtime not ready"
+                    : "Container runtime unavailable (Docker or Podman required)"}
+                </span>
+              </div>
+              <p className="text-xs text-rose-100/90 leading-relaxed">
+                {runtimeInfo?.error ||
+                  "Neither Docker nor Podman is currently available. Sandbox execution fails closed until a container runtime and image are ready."}
+              </p>
+              {runtimeInfo?.remediation && (
+                <p className="text-xs text-amber-200/90 font-mono">{runtimeInfo.remediation}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              data-testid="home-runtime-setup-action"
+              onClick={() => onSelectTab("setup")}
+              className="px-3.5 py-2 bg-rose-500 hover:bg-rose-400 text-slate-950 font-semibold rounded-lg text-xs whitespace-nowrap shrink-0 flex items-center gap-1.5"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Setup &amp; Status</span>
+            </button>
+          </section>
+        )}
+
         {/* Starter Tasks */}
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-4">
@@ -355,6 +398,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
               <button
                 key={item.title}
                 type="button"
+                data-testid="home-starter-prompt"
                 onClick={() => onTryPrompt(item.prompt)}
                 className="group text-left bg-[#0b1022] hover:bg-[#101833] border border-[#1b2544] hover:border-sky-400/45 rounded-xl p-4 transition-colors flex flex-col justify-between gap-2.5"
               >
@@ -393,6 +437,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 <button
                   key={mod.tab}
                   type="button"
+                  data-testid={mod.tab === "setup" ? "home-setup-status" : `home-module-${mod.tab}`}
                   onClick={() => onSelectTab(mod.tab)}
                   className="group text-left bg-[#080c1a] hover:bg-[#0e152e] border border-[#1b2544] hover:border-[#2c3d70] rounded-xl p-4 transition-colors space-y-2"
                 >

@@ -568,19 +568,32 @@ test("initial app view is Home with navigation including Home, Agent, Files, Mem
     });
 
     const text = container.textContent;
-    assert.match(text, /Build with Gemini\. Execute inside a boundary\./);
-    assert.match(text, /Open Agent/);
+    assert.match(
+      text,
+      /A Gemini-native coding agent for local projects, with a boundary around autonomous execution\./
+    );
+    assert.match(text, /Open Agent Chat/);
     assert.match(text, /Browse Files/);
-    assert.match(text, /Review Changes/);
+    assert.match(text, /Git Review/);
     assert.match(text, /Instructions & Memory/);
-    assert.match(text, /Get started/);
+    assert.match(text, /Start a Sandboxed Task/);
     assert.doesNotMatch(text, /What are you building today\?/);
 
-    for (const label of ["Home", "Agent", "Files", "Memory", "Review", "More"]) {
-      findButtonByText(container, label);
+    for (const testId of [
+      "nav-home",
+      "nav-agent",
+      "nav-files",
+      "nav-memory",
+      "nav-review",
+      "nav-more",
+      "nav-logo-home",
+      "home-open-agent",
+      "home-setup-status",
+    ]) {
+      findByTestId(container, testId);
     }
 
-    const homeNavButton = findButtonByText(container, "Home");
+    const homeNavButton = findByTestId(container, "nav-home");
     assert.equal(homeNavButton.getAttribute("aria-current"), "page");
 
     assert.equal(findByTestId(container, "home-active-project").textContent.includes("alpha-service"), true);
@@ -588,10 +601,10 @@ test("initial app view is Home with navigation including Home, Agent, Files, Mem
       findByTestId(container, "home-active-session").textContent.includes("Auth Refactor Investigation"),
       true
     );
-    assert.match(findByTestId(container, "home-runtime-provider").textContent, /Docker v27\.5\.1/);
-    assert.match(text, /Containerized/);
-    assert.match(text, /Disabled \(none\)/);
-    assert.match(findByTestId(container, "home-safe-execution-note").textContent, /isolated sandbox container/);
+    assert.match(findByTestId(container, "home-runtime-provider").textContent, /Docker Sandbox/);
+    assert.match(findByTestId(container, "home-readiness-badge").textContent, /Isolation Enforced/);
+    assert.match(findByTestId(container, "home-execution-boundary").textContent, /net: none/);
+    assert.match(text, /isolated inside an ephemeral container sandbox/);
   } finally {
     await act(async () => {
       root.unmount();
@@ -620,28 +633,31 @@ test("clicking Open Agent shows Agent Chat and clicking NanoGem logo returns to 
       );
     });
 
-    const openAgentBtn = findButtonByText(container, "Open Agent");
+    const openAgentBtn = findByTestId(container, "home-open-agent");
     await act(async () => {
       openAgentBtn.click();
     });
 
     assert.match(container.textContent, /What are you building today\?/);
-    assert.doesNotMatch(container.textContent, /Build with Gemini\. Execute inside a boundary\./);
+    assert.doesNotMatch(
+      container.textContent,
+      /A Gemini-native coding agent for local projects, with a boundary around autonomous execution\./
+    );
 
-    const agentNavBtn = findButtonByText(container, "Agent");
+    const agentNavBtn = findByTestId(container, "nav-agent");
     assert.equal(agentNavBtn.getAttribute("aria-current"), "page");
 
-    const logoBtn = collectElements(container).find(
-      (el) => el.tagName === "BUTTON" && el.getAttribute("aria-label") === "NanoGem Home"
-    );
-    assert.ok(logoBtn, "Expected NanoGem logo button with aria-label='NanoGem Home'");
+    const logoBtn = findByTestId(container, "nav-logo-home");
 
     await act(async () => {
       logoBtn.click();
     });
 
-    assert.match(container.textContent, /Build with Gemini\. Execute inside a boundary\./);
-    assert.equal(findButtonByText(container, "Home").getAttribute("aria-current"), "page");
+    assert.match(
+      container.textContent,
+      /A Gemini-native coding agent for local projects, with a boundary around autonomous execution\./
+    );
+    assert.equal(findByTestId(container, "nav-home").getAttribute("aria-current"), "page");
   } finally {
     await act(async () => {
       root.unmount();
@@ -687,35 +703,35 @@ test("chat messages persist while switching Home -> Agent -> Files -> Home -> Ag
     });
 
     // Starts on Home even when conversation history exists
-    assert.match(container.textContent, /Build with Gemini\. Execute inside a boundary\./);
-    assert.match(container.textContent, /2 messages in chat/);
+    assert.match(
+      container.textContent,
+      /A Gemini-native coding agent for local projects, with a boundary around autonomous execution\./
+    );
+    assert.match(findByTestId(container, "home-active-session").textContent, /2 messages/);
 
     // Switch to Agent Chat
     await act(async () => {
-      findButtonByText(container, "Open Agent").click();
+      findByTestId(container, "home-open-agent").click();
     });
     assert.match(container.textContent, /Check package\.json scripts and verify tests pass\./);
     assert.match(container.textContent, /Verified package\.json and ran the full test suite cleanly\./);
 
     // Switch to Files
     await act(async () => {
-      findButtonByText(container, "Files").click();
+      findByTestId(container, "nav-files").click();
     });
     assert.doesNotMatch(container.textContent, /Check package\.json scripts and verify tests pass\./);
 
     // Return Home via Logo
-    const logoBtn = collectElements(container).find(
-      (el) => el.tagName === "BUTTON" && el.getAttribute("aria-label") === "NanoGem Home"
-    );
-    assert.ok(logoBtn);
+    const logoBtn = findByTestId(container, "nav-logo-home");
     await act(async () => {
       logoBtn.click();
     });
-    assert.match(container.textContent, /2 messages in chat/);
+    assert.match(findByTestId(container, "home-active-session").textContent, /2 messages/);
 
     // Return to Agent Chat: messages must still be intact
     await act(async () => {
-      findButtonByText(container, "Open Agent").click();
+      findByTestId(container, "home-open-agent").click();
     });
     assert.match(container.textContent, /Check package\.json scripts and verify tests pass\./);
     assert.match(container.textContent, /Verified package\.json and ran the full test suite cleanly\./);
@@ -748,8 +764,8 @@ test("runtime-not-ready state is visible on Home with remediation and Setup & St
     });
 
     const badge = findByTestId(container, "home-readiness-badge");
-    assert.match(badge.textContent, /Runtime Not Ready/);
-    assert.doesNotMatch(badge.textContent, /Docker Ready|Podman Ready/);
+    assert.match(badge.textContent, /Runtime Unavailable/);
+    assert.doesNotMatch(badge.textContent, /Isolation Enforced/);
 
     const warning = findByTestId(container, "home-runtime-warning");
     assert.match(warning.textContent, /Container runtime unavailable/);
@@ -757,7 +773,7 @@ test("runtime-not-ready state is visible on Home with remediation and Setup & St
     assert.match(warning.textContent, /Install Docker Desktop or Podman/);
 
     await act(async () => {
-      findButtonByText(warning, "Setup & Status").click();
+      findByTestId(container, "home-runtime-setup-action").click();
     });
 
     assert.match(container.textContent, /NanoGem Readiness & Security Posture/);
@@ -857,18 +873,25 @@ test("clicking a Get started example prompt opens Agent Chat with the prompt loa
       );
     });
 
-    const starterBtn = findButtonByText(
-      container,
-      "Inspect repository files and summarize architecture"
+    const starterButtons = collectElements(container).filter(
+      (el) => el.getAttribute("data-testid") === "home-starter-prompt"
     );
+    assert.ok(starterButtons.length >= 3, "Expected starter prompt buttons on Home");
+    const archStarter = starterButtons.find((el) =>
+      el.textContent.includes("Inspect Project Architecture")
+    );
+    assert.ok(archStarter, "Expected 'Inspect Project Architecture' starter prompt");
     await act(async () => {
-      starterBtn.click();
+      archStarter.click();
     });
 
     assert.match(container.textContent, /What are you building today\?/);
     const textarea = collectElements(container).find((el) => el.tagName === "TEXTAREA");
     assert.ok(textarea, "Expected Agent Chat prompt textarea");
-    assert.equal(textarea.value, "Inspect repository files and summarize architecture");
+    assert.equal(
+      textarea.value,
+      "Inspect repository files in /workspace and summarize the architecture and entry points."
+    );
   } finally {
     await act(async () => {
       root.unmount();
